@@ -13,6 +13,8 @@ Flutter camera plugin for desktop platforms. iOS stub for platform declaration.
   s.dependency 'Flutter'
   s.platform         = :ios, '13.0'
 
+  s.resource_bundles = { 'camera_desktop_privacy' => ['camera_desktop/Sources/camera_desktop/PrivacyInfo.xcprivacy'] }
+
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386',

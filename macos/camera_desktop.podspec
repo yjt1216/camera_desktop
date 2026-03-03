@@ -15,5 +15,7 @@ for camera capture, preview, photo capture, and video recording.
   s.platform         = :osx, '10.15'
   s.swift_version    = '5.0'
 
+  s.resource_bundles = { 'camera_desktop_privacy' => ['camera_desktop/Sources/camera_desktop/PrivacyInfo.xcprivacy'] }
+
   s.frameworks       = 'AVFoundation', 'CoreMedia', 'CoreVideo', 'CoreImage', 'QuartzCore'
 end

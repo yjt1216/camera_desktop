@@ -1,3 +1,7 @@
+## 1.0.1
+
+* Fix xcprivacy build warnings by declaring resource_bundles in iOS and macOS podspecs
+
 ## 1.0.0
 
 First stable release of `camera_desktop`

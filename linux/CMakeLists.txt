@@ -47,3 +47,7 @@ set(camera_desktop_bundled_libraries
   ""
   PARENT_SCOPE
 )
+
+if(include_camera_desktop_tests)
+  add_subdirectory(test)
+endif()

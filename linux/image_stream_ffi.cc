@@ -48,6 +48,11 @@ void camera_desktop_ffi_release_handles_for_camera(Camera* camera) {
 extern "C" {
 
 __attribute__((visibility("default")))
+void camera_desktop_image_stream_noop_callback(int32_t camera_id) {
+  (void)camera_id;
+}
+
+__attribute__((visibility("default")))
 void* camera_desktop_get_image_stream_buffer(int64_t stream_handle) {
   Camera* camera = FindCameraByHandle(stream_handle);
   if (!camera) return nullptr;

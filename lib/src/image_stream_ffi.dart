@@ -87,6 +87,7 @@ class ImageStreamFfi {
     this._getBuffer,
     this._registerCallback,
     this._unregisterCallback,
+    this._nativeNoopCallback,
   );
 
   /// The native stream handle used to identify this stream to native code.
@@ -101,9 +102,19 @@ class ImageStreamFfi {
   /// FFI function to unregister the frame-ready callback.
   final _UnregisterCallbackDart _unregisterCallback;
 
-  /// The native callable that receives frame-ready notifications from any
-  /// native thread and delivers them to the Dart isolate's event loop.
-  NativeCallable<Void Function(Int32)>? _nativeCallable;
+  /// A native no-op callback symbol.
+  ///
+  /// Registered with native to keep the shared-buffer FFI fast path active
+  /// without storing a Dart callback trampoline that can become invalid after
+  /// hot restart.
+  final Pointer<NativeFunction<Void Function(Int32)>> _nativeNoopCallback;
+
+  /// Polls the shared buffer for new sequence numbers.
+  Timer? _pollTimer;
+
+  /// Prevents re-entrant polling when frame decoding/copying takes longer than
+  /// the poll interval.
+  bool _pollInProgress = false;
 
   /// The stream controller to which decoded frames are added.
   StreamController<CameraImageData>? _controller;
@@ -130,12 +141,17 @@ class ImageStreamFfi {
           .lookupFunction<_UnregisterCallbackNative, _UnregisterCallbackDart>(
             'camera_desktop_unregister_image_stream_callback',
           );
+      final nativeNoopCallback = lib
+          .lookup<NativeFunction<Void Function(Int32)>>(
+            'camera_desktop_image_stream_noop_callback',
+          );
 
       return ImageStreamFfi._(
         streamHandle,
         getBuffer,
         registerCallback,
         unregisterCallback,
+        nativeNoopCallback,
       );
     } catch (_) {
       return null;
@@ -162,26 +178,40 @@ class ImageStreamFfi {
     throw UnsupportedError('Unsupported platform for FFI image stream');
   }
 
-  /// Registers the FFI callback and starts delivering frames to [controller].
+  /// Registers a native no-op callback and starts polling the shared buffer.
+  ///
+  /// Using a native callback symbol (instead of [NativeCallable.listener])
+  /// avoids stale Dart callback metadata crashes during hot restart.
   void start(StreamController<CameraImageData> controller) {
     _controller = controller;
     _lastSequence = 0;
+    _pollInProgress = false;
 
-    _nativeCallable = NativeCallable<Void Function(Int32)>.listener(
-      _onFrameReady,
+    _registerCallback(_streamHandle, _nativeNoopCallback);
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(
+      const Duration(milliseconds: 8),
+      (_) => _pollForFrame(),
     );
-
-    _registerCallback(_streamHandle, _nativeCallable!.nativeFunction);
+    _pollForFrame();
   }
 
-  /// Called from any native thread when a new frame is ready.
-  ///
-  /// Delivered to the Dart isolate's event loop by
-  /// [NativeCallable.listener]. Reads the shared buffer, skips duplicate
+  /// Polls for one new frame and emits it if sequence has advanced.
+  void _pollForFrame() {
+    if (_pollInProgress) return;
+    _pollInProgress = true;
+    try {
+      _readLatestFrame();
+    } finally {
+      _pollInProgress = false;
+    }
+  }
+
+  /// Reads the shared buffer, skips duplicate
   /// frames by comparing sequence numbers, creates a zero-copy view over
   /// the native pixel buffer, then copies into a Dart-owned [Uint8List]
   /// (1 copy — required by the platform interface contract).
-  void _onFrameReady(int _) {
+  void _readLatestFrame() {
     final controller = _controller;
     if (controller == null || controller.isClosed) return;
 
@@ -227,13 +257,14 @@ class ImageStreamFfi {
 
   /// Unregisters the native callback.
   void stop() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
     _unregisterCallback(_streamHandle);
   }
 
   /// Releases all resources.
   void dispose() {
-    _nativeCallable?.close();
-    _nativeCallable = null;
+    stop();
     _controller = null;
   }
 }

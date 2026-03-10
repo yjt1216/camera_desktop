@@ -415,13 +415,17 @@ class CameraDesktopPlugin extends CameraPlatform {
         }
       },
       onCancel: () async {
+        // Unregister the native callback first so no new frames are dispatched.
         ffi?.stop();
-        ffi?.dispose();
         _imageStreamControllers.remove(cameraId);
+        // Tell native to stop streaming; await ensures the native side has
+        // fully stopped before we dispose the FFI poller.
         await _channel.invokeMethod<void>('stopImageStream', {
           'cameraId': cameraId,
           'streamHandle': streamHandle,
         });
+        // Native has stopped — safe to release FFI resources.
+        ffi?.dispose();
       },
       onPause: () {
         debugPrint(

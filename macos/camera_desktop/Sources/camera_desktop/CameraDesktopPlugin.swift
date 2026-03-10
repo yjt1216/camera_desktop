@@ -6,7 +6,7 @@ import AVFoundation
 /// Routes MethodChannel calls to the appropriate CameraSession instance.
 /// Speaks the exact same protocol as the Linux native side so the shared
 /// Dart CameraDesktopPlugin class works on both platforms.
-public class CameraDesktopPlugin: NSObject, FlutterPlugin {
+public class CameraDesktopPlugin: NSObject, FlutterPlugin, NSApplicationDelegate {
     private var sessions: [Int: CameraSession] = [:]
     private let sessionsLock = UnfairLock()
     private var nextCameraId = 1
@@ -29,6 +29,36 @@ public class CameraDesktopPlugin: NSObject, FlutterPlugin {
             methodChannel: channel
         )
         registrar.addMethodCallDelegate(instance, channel: channel)
+        registrar.addApplicationDelegate(instance)
+    }
+
+    deinit {
+        disposeAllSessions()
+    }
+
+    /// Called by the Flutter engine when it is being detached/destroyed.
+    ///
+    /// Note: on macOS this does NOT reliably fire during hot restart, but it
+    /// may fire during other teardown paths. Kept as defense-in-depth.
+    public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+        disposeAllSessions()
+    }
+
+    /// Called by NSApplication on normal app termination.
+    public func applicationWillTerminate(_ notification: Notification) {
+        disposeAllSessions()
+    }
+
+    private func disposeAllSessions() {
+        sessionsLock.lock()
+        let snapshot = sessions
+        sessions.removeAll()
+        sessionsLock.unlock()
+
+        for (cameraId, session) in snapshot {
+            ImageStreamHandleBridge.releaseHandles(forCameraId: cameraId)
+            session.dispose()
+        }
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

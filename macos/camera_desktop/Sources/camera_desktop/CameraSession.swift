@@ -22,10 +22,12 @@ class ImageStreamFFI {
     private var frontIndex: Int = 0  // 0 or 1 — which buffer Dart reads from
     private var callback: (@convention(c) (Int32) -> Void)?
     private var sequence: Int64 = 0
+    private var _disposed = false
     private let lock = UnfairLock()
 
     func getBufferPointer() -> UnsafeMutableRawPointer? {
         lock.lock()
+        guard !_disposed else { lock.unlock(); return nil }
         let idx = frontIndex
         lock.unlock()
         return idx == 0 ? buffers.0 : buffers.1
@@ -49,7 +51,27 @@ class ImageStreamFFI {
         lock.unlock()
     }
 
+    /// Releases buffers and prevents any further writes. Safe to call from any thread.
+    func dispose() {
+        lock.lock()
+        guard !_disposed else { lock.unlock(); return }
+        _disposed = true
+        callback = nil
+        let b0 = buffers.0
+        let b1 = buffers.1
+        buffers = (nil, nil)
+        lock.unlock()
+        b0?.deallocate()
+        b1?.deallocate()
+    }
+
     func writeFrame(pixelBuffer: CVPixelBuffer, cameraId: Int) {
+        // Bail out immediately if disposed — no lock held during memcpy below.
+        lock.lock()
+        if _disposed { lock.unlock(); return }
+        let backIdx = 1 - frontIndex
+        lock.unlock()
+
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
@@ -60,26 +82,24 @@ class ImageStreamFFI {
         let dataSize = bytesPerRow * height
         let totalSize = ImageStreamFFI.headerSize + dataSize
 
-        // Determine back buffer index (brief lock)
+        // Resize back buffer if needed — hold lock for the pointer swap only.
         lock.lock()
-        let backIdx = 1 - frontIndex
-        lock.unlock()
-
-        // Ensure back buffer is large enough (only the back buffer is reallocated)
+        if _disposed { lock.unlock(); return }
         let backSize = backIdx == 0 ? bufferSizes.0 : bufferSizes.1
         var backBuf = backIdx == 0 ? buffers.0 : buffers.1
-
         if backSize < totalSize {
+            let newBuf = UnsafeMutableRawPointer.allocate(byteCount: totalSize, alignment: 8)
             backBuf?.deallocate()
-            backBuf = UnsafeMutableRawPointer.allocate(byteCount: totalSize, alignment: 8)
+            backBuf = newBuf
             if backIdx == 0 {
-                buffers.0 = backBuf
+                buffers.0 = newBuf
                 bufferSizes.0 = totalSize
             } else {
-                buffers.1 = backBuf
+                buffers.1 = newBuf
                 bufferSizes.1 = totalSize
             }
         }
+        lock.unlock()
 
         guard let buf = backBuf else { return }
 
@@ -95,18 +115,17 @@ class ImageStreamFFI {
         buf.storeBytes(of: Int32(0), toByteOffset: 20, as: Int32.self) // format=BGRA
         buf.storeBytes(of: Int32(1), toByteOffset: 24, as: Int32.self) // ready=1
 
-        // Swap front/back and grab callback — brief lock
+        // Swap front/back and invoke callback (a native no-op symbol) under
+        // the lock. Safe because the callback is a trivial C function.
         lock.lock()
+        if _disposed { lock.unlock(); return }
         frontIndex = backIdx
-        let cb = callback
+        callback?(Int32(cameraId))
         lock.unlock()
-
-        cb?(Int32(cameraId))
     }
 
     deinit {
-        buffers.0?.deallocate()
-        buffers.1?.deallocate()
+        dispose()
     }
 }
 
@@ -140,6 +159,7 @@ class CameraSession: NSObject {
     private let imageStreamFFI = ImageStreamFFI()
     private var _previewPaused = false
     private var _imageStreaming = false
+    private var _isDisposed = false
     private var latestBuffer: CVPixelBuffer?
 
     private var previewPaused: Bool {
@@ -451,22 +471,43 @@ class CameraSession: NSObject {
 
     // MARK: - Disposal
 
+    /// Disposes the camera session. Safe to call multiple times (idempotent).
+    ///
+    /// Synchronously unregisters the FFI callback, stops image streaming, stops
+    /// the AVCaptureSession (which blocks until all in-flight delegate calls
+    /// complete), and tears down the session graph. After this method returns,
+    /// the capture queue will not invoke any more callbacks.
+    /// Texture unregistration and the cameraClosing event are dispatched to the
+    /// main queue as they require UI-thread access.
     func dispose() {
-        sessionQueue.async { [self] in
-            self.recordHandler.stopRecording { _ in }
-            self.captureSession?.stopRunning()
-            self.captureSession = nil
-            self.videoDevice = nil
-            self.videoOutput = nil
-            self.audioOutput = nil
+        // Idempotency guard — first caller wins.
+        flagsLock.lock()
+        if _isDisposed { flagsLock.unlock(); return }
+        _isDisposed = true
+        _imageStreaming = false
+        flagsLock.unlock()
 
-            DispatchQueue.main.async {
-                if self.texture != nil, let registry = self.textureRegistry {
-                    registry.unregisterTexture(self.textureId)
-                }
-                self.texture = nil
-                self.methodChannel?.invokeMethod("cameraClosing", arguments: ["cameraId": self.cameraId])
+        // Null out the FFI callback under lock — guarantees no in-flight
+        // invocation reaches Dart after this returns.
+        imageStreamFFI.unregisterCallback()
+
+        // stopRunning() blocks until all in-flight AVCaptureOutput delegate
+        // calls have returned, so after this line captureOutput() cannot fire.
+        recordHandler.stopRecording { _ in }
+        captureSession?.stopRunning()
+        captureSession = nil
+        videoDevice = nil
+        videoOutput = nil
+        audioOutput = nil
+
+        // UI cleanup must happen on the main thread.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.texture != nil, let registry = self.textureRegistry {
+                registry.unregisterTexture(self.textureId)
             }
+            self.texture = nil
+            self.methodChannel?.invokeMethod("cameraClosing", arguments: ["cameraId": self.cameraId])
         }
     }
 }

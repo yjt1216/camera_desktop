@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <camera_desktop/camera_desktop-Swift.h>
 
+void camera_desktop_image_stream_noop_callback(int32_t camera_id) {
+    (void)camera_id;
+}
+
 void* _Nullable camera_desktop_get_image_stream_buffer(int64_t stream_handle) {
     return [ImageStreamHandleBridge getImageStreamBufferForHandle:stream_handle];
 }

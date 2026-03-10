@@ -1,3 +1,11 @@
+## 1.0.3
+
+* Fix hot restart FFI crash by replacing NativeCallable with polling
+
+## 1.0.2
+
+* Fix macOS use-after-free crash during engine teardown by making dispose synchronous/idempotent and guarding FFI callbacks
+
 ## 1.0.1
 
 * Fix xcprivacy build warnings by declaring resource_bundles in iOS and macOS podspecs

@@ -9,7 +9,7 @@ Flutter camera plugin for desktop platforms. iOS stub for platform declaration.
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Hugo Cornellier' => 'hugo@hugocornellier.com' }
   s.source           = { :path => '.' }
-  s.source_files     = 'camera_desktop/Sources/camera_desktop/**/*'
+  s.source_files     = 'camera_desktop/Sources/camera_desktop/**/*.{swift,h,m}'
   s.dependency 'Flutter'
   s.platform         = :ios, '13.0'
 

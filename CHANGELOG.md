@@ -1,3 +1,7 @@
+## 1.0.6
+
+* Fix Xcode build warnings by declaring PrivacyInfo.xcprivacy as a resource bundle in iOS and macOS podspecs
+
 ## 1.0.5
 
 * Fixes #1: conflict with camera_android and camera_avfoundation dependencies

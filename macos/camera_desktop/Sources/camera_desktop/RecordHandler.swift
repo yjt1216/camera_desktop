@@ -42,7 +42,7 @@ class RecordHandler: NSObject {
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
-        // Video input — H.264 encoding.
+        // Video input, H.264 encoding.
         var compression: [String: Any] = [
             AVVideoExpectedSourceFrameRateKey: targetFps,
             AVVideoMaxKeyFrameIntervalKey: max(targetFps, 1),
@@ -63,7 +63,7 @@ class RecordHandler: NSObject {
             writer.add(vInput)
         }
 
-        // Audio input — AAC encoding.
+        // Audio input, AAC encoding.
         var aInput: AVAssetWriterInput?
         if enableAudio {
             let audioSettings: [String: Any] = [

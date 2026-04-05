@@ -85,7 +85,7 @@ void Camera::Initialize(FlMethodCall* method_call) {
     return;
   }
 
-  // Set a timeout for initialization — if no frame arrives in time, fail.
+  // Set a timeout for initialization, if no frame arrives in time, fail.
   init_timeout_id_ =
       g_timeout_add(kInitTimeoutMs, Camera::OnInitTimeout, this);
 }
@@ -212,11 +212,11 @@ GstFlowReturn Camera::OnNewSample(GstAppSink* sink, gpointer user_data) {
   }
 
   // Handle first-frame initialization response.
-  // C-2: first_frame_received_ is atomic — safe cross-thread read/write.
+  // C-2: first_frame_received_ is atomic, safe cross-thread read/write.
   bool is_first_frame = !self->first_frame_received_.load();
   if (is_first_frame) {
     self->first_frame_received_.store(true);
-    // H-2: actual_width_/height_ are atomic — safe cross-thread write.
+    // H-2: actual_width_/height_ are atomic, safe cross-thread write.
     self->actual_width_.store(width);
     self->actual_height_.store(height);
     self->state_.store(CameraState::kRunning);
@@ -224,13 +224,13 @@ GstFlowReturn Camera::OnNewSample(GstAppSink* sink, gpointer user_data) {
 
   // Update the texture only if preview is not paused (or if this is the first
   // frame, which we need for initialization).
-  // C-3: preview_paused_ is atomic — safe cross-thread read.
+  // C-3: preview_paused_ is atomic, safe cross-thread read.
   if (!self->preview_paused_.load() || is_first_frame) {
     if (stride == width * 4) {
-      // No padding — direct copy.
+      // No padding, direct copy.
       camera_texture_update(self->texture_, map.data, width, height);
     } else {
-      // Stride has padding — copy row-by-row into a tight buffer.
+      // Stride has padding, copy row-by-row into a tight buffer.
       // M-1 note: this intermediate allocation is unavoidable here since
       // camera_texture_update requires a tightly-packed buffer.
       size_t tight_size = (size_t)width * height * 4;
@@ -284,7 +284,7 @@ GstFlowReturn Camera::OnNewSample(GstAppSink* sink, gpointer user_data) {
       buf->format = 1;  // RGBA (Linux GStreamer pipeline)
       buf->sequence = ++self->image_stream_sequence_;
 
-      // C-5: release fence — guarantees all pixel and metadata writes above
+      // C-5: release fence, guarantees all pixel and metadata writes above
       // are visible to any thread that subsequently observes ready == 1.
       std::atomic_thread_fence(std::memory_order_release);
       buf->ready = 1;
@@ -408,7 +408,7 @@ gboolean Camera::OnInitTimeout(gpointer user_data) {
 
   if (self->state_.load() == CameraState::kInitializing) {
     self->RespondToPendingInit(
-        false, "Camera initialization timed out — no frames received");
+        false, "Camera initialization timed out, no frames received");
     if (self->pipeline_) {
       gst_element_set_state(self->pipeline_, GST_STATE_NULL);
     }
@@ -517,7 +517,7 @@ void Camera::StartVideoRecording(FlMethodCall* method_call) {
   // Set up the recording branch on first use.
   if (!record_handler_->is_recording()) {
     GError* error = nullptr;
-    // H-2: load actual dimensions atomically — they are written from the
+    // H-2: load actual dimensions atomically, they are written from the
     // GStreamer streaming thread on first frame.
     if (!record_handler_->Setup(pipeline_, tee_,
                                 actual_width_.load(), actual_height_.load(),
@@ -584,7 +584,7 @@ void Camera::StopImageStream() {
 }
 
 void Camera::RegisterImageStreamCallback(void (*callback)(int32_t)) {
-  // C-4: atomic store — safe to write from main thread while GStreamer thread
+  // C-4: atomic store, safe to write from main thread while GStreamer thread
   // reads. The GStreamer thread loads the pointer once per frame (see
   // OnNewSample) so it cannot race between check and call.
   image_stream_callback_.store(callback);
@@ -595,7 +595,7 @@ void Camera::UnregisterImageStreamCallback() {
 }
 
 void Camera::PausePreview() {
-  // C-3: atomic store — safe cross-thread write.
+  // C-3: atomic store, safe cross-thread write.
   preview_paused_.store(true);
 }
 
@@ -624,7 +624,7 @@ void Camera::Dispose() {
 
   // C-4: null the callback atomically BEFORE stopping the pipeline. This
   // prevents new FFI callbacks from being registered while we're tearing down,
-  // but does NOT free the buffer yet — that must wait until the pipeline stops.
+  // but does NOT free the buffer yet, that must wait until the pipeline stops.
   image_stream_callback_.store(nullptr);
 
   // C-1 FIX: stop the pipeline BEFORE freeing image_stream_buffer_.

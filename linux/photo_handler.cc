@@ -11,7 +11,7 @@ bool PhotoHandler::TakePicture(GstElement* appsink,
                                GError** error) {
   if (!appsink) {
     g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                "Appsink is null — camera not initialized");
+                "Appsink is null, camera not initialized");
     return false;
   }
 

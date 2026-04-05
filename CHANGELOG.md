@@ -1,3 +1,12 @@
+## 1.0.7
+
+* Fix camera initialization failure on Intel Macs by selecting session preset after device discovery using `device.supportsSessionPreset()` with automatic fallback (1080p → 720p → high → medium)
+* Make `canAddInput`/`canAddOutput` failures return a `FlutterError` instead of silently skipping, preventing blank-screen timeouts
+* Increase initialization timeout from 8s to 15s for slower USB cameras
+* Subscribe to `AVCaptureSessionRuntimeError`, `WasInterrupted`, and `InterruptionEnded` notifications and forward to Dart via `cameraError`
+* Fix MethodChannel image stream fallback sending hardcoded `bytesPerRow` instead of actual value from `CVPixelBuffer`
+* Add diagnostic logging at all critical points in macOS session setup
+
 ## 1.0.6
 
 * Fix Xcode build warnings by declaring PrivacyInfo.xcprivacy as a resource bundle in iOS and macOS podspecs
@@ -28,9 +37,9 @@ First stable release of `camera_desktop`
 
 ### Platform implementations
 
-* **macOS** — AVFoundation (`AVCaptureSession`, `AVAssetWriter`). Preview via `CVPixelBuffer` textures, H.264/AAC recording, native mirror support.
-* **Windows** — Media Foundation (`IMFCaptureEngine`) with Direct3D 11 texture rendering. H.264/AAC recording via `IMFSinkWriter`.
-* **Linux** — GStreamer + V4L2 (`v4l2src → videoconvert → appsink` pipeline). H.264/AAC recording with automatic encoder selection, native mirror via `videoflip`.
+* **macOS**, AVFoundation (`AVCaptureSession`, `AVAssetWriter`). Preview via `CVPixelBuffer` textures, H.264/AAC recording, native mirror support.
+* **Windows**, Media Foundation (`IMFCaptureEngine`) with Direct3D 11 texture rendering. H.264/AAC recording via `IMFSinkWriter`.
+* **Linux**, GStreamer + V4L2 (`v4l2src → videoconvert → appsink` pipeline). H.264/AAC recording with automatic encoder selection, native mirror via `videoflip`.
 
 ### Features
 

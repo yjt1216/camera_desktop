@@ -241,7 +241,7 @@ HRESULT Camera::CreateCaptureEngine() {
   hr = MFCreateAttributes(&attrs, 3);
   if (FAILED(hr)) return hr;
 
-  // D3D11 hardware acceleration — best-effort.
+  // D3D11 hardware acceleration, best-effort.
   {
     HRESULT d3d_hr = D3D11CreateDevice(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
@@ -289,7 +289,7 @@ HRESULT Camera::CreateCaptureEngine() {
     return hr;
   }
 
-  // Audio device source — best-effort (non-fatal).
+  // Audio device source, best-effort (non-fatal).
   ComPtr<IMFMediaSource> audio_source;
   if (config_.enable_audio) {
     ComPtr<IMFAttributes> aud_enum_attrs;
@@ -332,7 +332,7 @@ HRESULT Camera::CreateCaptureEngine() {
   ComPtr<IMFCaptureEngineOnEventCallback> event_cb(
       new CaptureEngineCallback(weak_from_this()));
 
-  // Initialize async — MF_CAPTURE_ENGINE_INITIALIZED event fires on completion.
+  // Initialize async, MF_CAPTURE_ENGINE_INITIALIZED event fires on completion.
   hr = capture_engine_->Initialize(event_cb.Get(), attrs.Get(),
                                    audio_source.Get(), video_source.Get());
   if (FAILED(hr)) {
@@ -440,7 +440,7 @@ HRESULT Camera::StartPreviewInternal() {
   hr = preview_sink_->SetSampleCallback(stream_index, sample_cb.Get());
   if (FAILED(hr)) return hr;
 
-  // Set source device media type — guides resolution selection.
+  // Set source device media type, guides resolution selection.
   ComPtr<IMFCaptureSource> source;
   if (SUCCEEDED(capture_engine_->GetSource(&source))) {
     HRESULT set_hr = source->SetCurrentDeviceMediaType(
@@ -501,9 +501,9 @@ void Camera::Initialize(
             lk, std::chrono::seconds(8),
             [self] { return self->init_timeout_cancelled_; });
         if (timed_out) {
-          DebugLog("Camera::Initialize: timeout — no frames received");
+          DebugLog("Camera::Initialize: timeout, no frames received");
           self->CompleteInit(false,
-                             "Camera initialization timed out — no frames received");
+                             "Camera initialization timed out, no frames received");
         }
       }
       CoUninitialize();
@@ -697,7 +697,7 @@ void Camera::OnPreviewSample(IMFSample* sample) {
 
   BYTE* data = packed_frame_.data();
 
-  // Snapshot for photo capture (natural BGRA — mirroring handled in Flutter).
+  // Snapshot for photo capture (natural BGRA, mirroring handled in Flutter).
   {
     std::lock_guard<std::mutex> lk(latest_frame_mutex_);
     latest_frame_.resize(packed_len);
@@ -1178,7 +1178,7 @@ void Camera::DisposeInternal() {
   // Fail any outstanding pending results.
   FailAllPendingResults("Camera disposed");
 
-  // Stop recording (non-finalizing — we don't care about the output file).
+  // Stop recording (non-finalizing, we don't care about the output file).
   if (is_recording_.load() && capture_engine_) {
     is_recording_ = false;
     capture_engine_->StopRecord(FALSE, FALSE);

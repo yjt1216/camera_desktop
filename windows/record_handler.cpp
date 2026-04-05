@@ -111,7 +111,7 @@ HRESULT RecordHandler::InitRecordSink(IMFCaptureEngine* capture_engine,
   hr = record_sink_->RemoveAllStreams();
   if (FAILED(hr)) return hr;
 
-  // Video stream — H264.
+  // Video stream, H264.
   ComPtr<IMFMediaType> video_type;
   hr = BuildVideoOutputType(base_capture_media_type, &video_type, fps,
                             video_bitrate);
@@ -123,7 +123,7 @@ HRESULT RecordHandler::InitRecordSink(IMFCaptureEngine* capture_engine,
       video_type.Get(), nullptr, &video_stream_index);
   if (FAILED(hr)) return hr;
 
-  // Audio stream — AAC. Non-fatal: record continues without audio on failure.
+  // Audio stream, AAC. Non-fatal: record continues without audio on failure.
   if (enable_audio) {
     ComPtr<IMFMediaType> audio_type;
     if (SUCCEEDED(BuildAudioOutputType(&audio_type, audio_bitrate))) {

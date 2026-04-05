@@ -19,7 +19,7 @@ class ImageStreamFFI {
 
     private var buffers: (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) = (nil, nil)
     private var bufferSizes: (Int, Int) = (0, 0)
-    private var frontIndex: Int = 0  // 0 or 1 — which buffer Dart reads from
+    private var frontIndex: Int = 0  // 0 or 1, which buffer Dart reads from
     private var callback: (@convention(c) (Int32) -> Void)?
     private var sequence: Int64 = 0
     private var _disposed = false
@@ -66,7 +66,7 @@ class ImageStreamFFI {
     }
 
     func writeFrame(pixelBuffer: CVPixelBuffer, cameraId: Int) {
-        // Bail out immediately if disposed — no lock held during memcpy below.
+        // Bail out immediately if disposed, no lock held during memcpy below.
         lock.lock()
         if _disposed { lock.unlock(); return }
         let backIdx = 1 - frontIndex
@@ -82,7 +82,7 @@ class ImageStreamFFI {
         let dataSize = bytesPerRow * height
         let totalSize = ImageStreamFFI.headerSize + dataSize
 
-        // Resize back buffer if needed — hold lock for the pointer swap only.
+        // Resize back buffer if needed, hold lock for the pointer swap only.
         lock.lock()
         if _disposed { lock.unlock(); return }
         let backSize = backIdx == 0 ? bufferSizes.0 : bufferSizes.1
@@ -103,7 +103,7 @@ class ImageStreamFFI {
 
         guard let buf = backBuf else { return }
 
-        // Write to back buffer — no lock held during memcpy
+        // Write to back buffer, no lock held during memcpy
         buf.storeBytes(of: Int32(0), toByteOffset: 24, as: Int32.self) // ready=0
         memcpy(buf.advanced(by: ImageStreamFFI.headerSize), baseAddress, dataSize)
 
@@ -129,7 +129,7 @@ class ImageStreamFFI {
     }
 }
 
-/// Manages a single camera session — AVCaptureSession lifecycle, preview texture,
+/// Manages a single camera session, AVCaptureSession lifecycle, preview texture,
 /// photo capture, video recording, and image streaming.
 ///
 /// One CameraSession instance exists per active camera (identified by cameraId).
@@ -176,7 +176,7 @@ class CameraSession: NSObject {
     private var actualHeight: Int = 0
     private var firstFrameReceived = false
 
-    /// Pending initialization result callback — called when the first frame arrives.
+    /// Pending initialization result callback, called when the first frame arrives.
     private var pendingInitResult: FlutterResult?
 
     struct CameraConfig {
@@ -231,14 +231,8 @@ class CameraSession: NSObject {
 
     private func setupSession(result: @escaping FlutterResult) {
         let session = AVCaptureSession()
-        let preset = DeviceEnumerator.sessionPreset(for: config.resolutionPreset)
-        if session.canSetSessionPreset(preset) {
-            session.sessionPreset = preset
-        } else {
-            session.sessionPreset = .high
-        }
 
-        // Find the video device.
+        // Find the video device FIRST so we can validate preset support against it.
         let devices = AVCaptureDevice.captureDevices(mediaType: .video)
         guard let device = devices.first(where: { $0.uniqueID == config.deviceId })
                 ?? devices.first else {
@@ -250,6 +244,26 @@ class CameraSession: NSObject {
             return
         }
         videoDevice = device
+        print("[camera_desktop] Device found: uniqueID=\(device.uniqueID) deviceType=\(device.deviceType.rawValue) position=\(device.position.rawValue)")
+
+        // Select preset based on what the device actually supports.
+        let desiredPreset = DeviceEnumerator.sessionPreset(for: config.resolutionPreset)
+        let fallbackPresets: [AVCaptureSession.Preset] = [.hd1920x1080, .hd1280x720, .high, .medium]
+        var chosenPreset: AVCaptureSession.Preset = .medium
+        var usedFallback = false
+        if device.supportsSessionPreset(desiredPreset) && session.canSetSessionPreset(desiredPreset) {
+            chosenPreset = desiredPreset
+        } else {
+            usedFallback = true
+            for fp in fallbackPresets {
+                if device.supportsSessionPreset(fp) && session.canSetSessionPreset(fp) {
+                    chosenPreset = fp
+                    break
+                }
+            }
+        }
+        session.sessionPreset = chosenPreset
+        print("[camera_desktop] Preset selected: \(chosenPreset.rawValue) (desired=\(desiredPreset.rawValue), usedFallback=\(usedFallback))")
 
         // Configure device.
         do {
@@ -262,15 +276,23 @@ class CameraSession: NSObject {
             }
             device.unlockForConfiguration()
         } catch {
-            // Non-fatal — continue with default settings.
+            // Non-fatal, continue with default settings.
         }
 
         // Add video input.
         do {
             let videoInput = try AVCaptureDeviceInput(device: device)
-            if session.canAddInput(videoInput) {
-                session.addInput(videoInput)
+            let canAdd = session.canAddInput(videoInput)
+            print("[camera_desktop] canAddInput: \(canAdd)")
+            guard canAdd else {
+                DispatchQueue.main.async {
+                    result(FlutterError(code: "input_failed",
+                                        message: "canAddInput returned false for device=\(device.uniqueID) preset=\(chosenPreset.rawValue) format=BGRA",
+                                        details: nil))
+                }
+                return
             }
+            session.addInput(videoInput)
         } catch {
             let message = error.localizedDescription
             DispatchQueue.main.async {
@@ -291,7 +313,7 @@ class CameraSession: NSObject {
                         session.addInput(audioInput)
                     }
                 } catch {
-                    // Non-fatal — continue without audio.
+                    // Non-fatal, continue without audio.
                 }
             }
         }
@@ -303,9 +325,17 @@ class CameraSession: NSObject {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
         ]
         vOutput.setSampleBufferDelegate(self, queue: captureQueue)
-        if session.canAddOutput(vOutput) {
-            session.addOutput(vOutput)
+        let canAddOutput = session.canAddOutput(vOutput)
+        print("[camera_desktop] canAddOutput: \(canAddOutput)")
+        guard canAddOutput else {
+            DispatchQueue.main.async {
+                result(FlutterError(code: "output_failed",
+                                    message: "canAddOutput returned false for device=\(device.uniqueID) preset=\(chosenPreset.rawValue) format=BGRA",
+                                    details: nil))
+            }
+            return
         }
+        session.addOutput(vOutput)
         videoOutput = vOutput
 
         // Mirror at the capture source so all consumers get mirrored frames.
@@ -325,21 +355,68 @@ class CameraSession: NSObject {
             audioOutput = aOutput
         }
 
+        // Subscribe to runtime error and interruption notifications.
+        let nc = NotificationCenter.default
+        nc.addObserver(self,
+                       selector: #selector(sessionRuntimeError(_:)),
+                       name: .AVCaptureSessionRuntimeError,
+                       object: session)
+        nc.addObserver(self,
+                       selector: #selector(sessionWasInterrupted(_:)),
+                       name: .AVCaptureSessionWasInterrupted,
+                       object: session)
+        nc.addObserver(self,
+                       selector: #selector(sessionInterruptionEnded(_:)),
+                       name: .AVCaptureSessionInterruptionEnded,
+                       object: session)
+
         captureSession = session
         pendingInitResult = result
         firstFrameReceived = false
 
-        // Start running — the first frame callback will respond to the pending result.
+        // Start running, the first frame callback will respond to the pending result.
         session.startRunning()
+        print("[camera_desktop] session.startRunning() called, isRunning=\(session.isRunning)")
 
-        // Timeout: if no frame arrives in 8 seconds, fail.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+        // Timeout: if no frame arrives in 15 seconds, fail.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15.0) { [weak self] in
             guard let self = self, let pending = self.pendingInitResult else { return }
+            print("[camera_desktop] Initialization timeout fired, no frames received within 15s")
             self.pendingInitResult = nil
             pending(FlutterError(code: "initialization_timeout",
-                                 message: "Camera initialization timed out — no frames received",
+                                 message: "Camera initialization timed out, no frames received",
                                  details: nil))
         }
+    }
+
+    @objc private func sessionRuntimeError(_ notification: Notification) {
+        let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
+        let message = error?.localizedDescription ?? "Unknown runtime error"
+        print("[camera_desktop] AVCaptureSessionRuntimeError: \(message)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.methodChannel?.invokeMethod("cameraError", arguments: [
+                "cameraId": self.cameraId,
+                "message": message,
+            ])
+        }
+    }
+
+    @objc private func sessionWasInterrupted(_ notification: Notification) {
+        let reasonValue = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
+        let reason = AVCaptureSession.InterruptionReason(rawValue: reasonValue)?.debugDescription ?? "reason=\(reasonValue)"
+        print("[camera_desktop] AVCaptureSessionWasInterrupted: \(reason)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.methodChannel?.invokeMethod("cameraError", arguments: [
+                "cameraId": self.cameraId,
+                "message": "Camera session interrupted: \(reason)",
+            ])
+        }
+    }
+
+    @objc private func sessionInterruptionEnded(_ notification: Notification) {
+        print("[camera_desktop] AVCaptureSessionInterruptionEnded — session recovering")
     }
 
     // MARK: - Photo Capture
@@ -457,7 +534,7 @@ class CameraSession: NSObject {
     // MARK: - Mirror Control
 
     /// Toggles horizontal mirroring on the live video output connection.
-    /// Can be called while the session is running — no restart needed.
+    /// Can be called while the session is running, no restart needed.
     func setMirror(mirrored: Bool) {
         sessionQueue.async { [self] in
             guard let connection = self.videoOutput?.connection(with: .video),
@@ -480,16 +557,19 @@ class CameraSession: NSObject {
     /// Texture unregistration and the cameraClosing event are dispatched to the
     /// main queue as they require UI-thread access.
     func dispose() {
-        // Idempotency guard — first caller wins.
+        // Idempotency guard, first caller wins.
         flagsLock.lock()
         if _isDisposed { flagsLock.unlock(); return }
         _isDisposed = true
         _imageStreaming = false
         flagsLock.unlock()
 
-        // Null out the FFI callback under lock — guarantees no in-flight
+        // Null out the FFI callback under lock, guarantees no in-flight
         // invocation reaches Dart after this returns.
         imageStreamFFI.unregisterCallback()
+
+        // Remove notification observers before stopping the session.
+        NotificationCenter.default.removeObserver(self)
 
         // stopRunning() blocks until all in-flight AVCaptureOutput delegate
         // calls have returned, so after this line captureOutput() cannot fire.
@@ -544,6 +624,7 @@ extension CameraSession: AVCaptureVideoDataOutputSampleBufferDelegate,
             firstFrameReceived = true
             actualWidth = width
             actualHeight = height
+            print("[camera_desktop] First frame received: width=\(width) height=\(height)")
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self, let pending = self.pendingInitResult else { return }
@@ -582,12 +663,14 @@ extension CameraSession: AVCaptureVideoDataOutputSampleBufferDelegate,
                 let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
                 let dataSize = bytesPerRow * height
                 let data = Data(bytes: baseAddress, count: dataSize)
+                let capturedBytesPerRow = bytesPerRow
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     self.methodChannel?.invokeMethod("imageStreamFrame", arguments: [
                         "cameraId": self.cameraId,
                         "width": width,
                         "height": height,
+                        "bytesPerRow": capturedBytesPerRow,
                         "bytes": FlutterStandardTypedData(bytes: data),
                     ])
                 }

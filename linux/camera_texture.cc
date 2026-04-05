@@ -114,7 +114,7 @@ void camera_texture_update(CameraTexture* self,
 
   // --- Phase 1: ensure buffers are allocated and capture write_idx. ---
   // The lock is held briefly only to check/update dimensions and read
-  // write_idx. Reallocation (rare — only on resolution change) also happens
+  // write_idx. Reallocation (rare, only on resolution change) also happens
   // here, under the lock, because copy_pixels_impl may be reading
   // buffers[read_idx] concurrently and we must not free it mid-read.
   g_mutex_lock(&self->mutex);

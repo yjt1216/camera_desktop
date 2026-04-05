@@ -40,7 +40,7 @@ class CameraTexture {
   std::unique_ptr<flutter::TextureVariant> texture_variant_;
   int64_t texture_id_ = -1;
 
-  // Triple buffer — same pattern as linux/camera_texture.cc.
+  // Triple buffer, same pattern as linux/camera_texture.cc.
   std::vector<uint8_t> bufs_[3];
   int write_idx_ = 0;
   int ready_idx_ = 1;

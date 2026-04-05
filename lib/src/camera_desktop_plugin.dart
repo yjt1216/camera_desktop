@@ -116,6 +116,7 @@ class CameraDesktopPlugin extends CameraPlatform {
         if (controller != null && !controller.isClosed) {
           final width = args['width']! as int;
           final height = args['height']! as int;
+          final bytesPerRow = args['bytesPerRow'] as int? ?? (width * 4);
           final bytes = args['bytes']! as Uint8List;
           controller.add(
             CameraImageData(
@@ -128,7 +129,7 @@ class CameraDesktopPlugin extends CameraPlatform {
               planes: [
                 CameraImagePlane(
                   bytes: bytes,
-                  bytesPerRow: width * 4,
+                  bytesPerRow: bytesPerRow,
                   bytesPerPixel: 4,
                   width: width,
                   height: height,
@@ -350,7 +351,7 @@ class CameraDesktopPlugin extends CameraPlatform {
   /// On Linux, this toggles the `videoflip` GStreamer element's method.
   /// On Windows, this returns a platform `unsupported` error.
   ///
-  /// Can be called while the camera is running — no restart needed.
+  /// Can be called while the camera is running, no restart needed.
   /// Silently ignored via [MissingPluginException] if the native side
   /// has no handler for this platform.
   Future<void> setMirror(int cameraId, bool mirrored) async {
@@ -424,13 +425,13 @@ class CameraDesktopPlugin extends CameraPlatform {
           'cameraId': cameraId,
           'streamHandle': streamHandle,
         });
-        // Native has stopped — safe to release FFI resources.
+        // Native has stopped, safe to release FFI resources.
         ffi?.dispose();
       },
       onPause: () {
         debugPrint(
           '[camera_desktop] Warning: pausing image stream '
-          'subscription has no effect — native frames continue flowing.',
+          'subscription has no effect, native frames continue flowing.',
         );
       },
       onResume: () {
@@ -453,7 +454,7 @@ class CameraDesktopPlugin extends CameraPlatform {
     }
   }
 
-  /// No-op on desktop — no preparation needed before recording.
+  /// No-op on desktop, no preparation needed before recording.
   @override
   Future<void> prepareForVideoRecording() async {}
 
@@ -619,14 +620,14 @@ class CameraDesktopPlugin extends CameraPlatform {
     }
   }
 
-  /// No-op on desktop — orientation locking is not applicable.
+  /// No-op on desktop, orientation locking is not applicable.
   @override
   Future<void> lockCaptureOrientation(
     int cameraId,
     DeviceOrientation orientation,
   ) async {}
 
-  /// No-op on desktop — orientation locking is not applicable.
+  /// No-op on desktop, orientation locking is not applicable.
   @override
   Future<void> unlockCaptureOrientation(int cameraId) async {}
 

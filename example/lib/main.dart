@@ -69,7 +69,7 @@ class _CameraExamplePageState extends State<CameraExamplePage> {
   int _nextPendingVideoId = 1;
   final List<_PendingVideo> _pendingVideos = <_PendingVideo>[];
 
-  // Settings state — these drive the CameraController constructor.
+  // Settings state, these drive the CameraController constructor.
   int _selectedCameraIndex = 0;
   ResolutionPreset _resolutionPreset = ResolutionPreset.veryHigh;
   int _fps = 30;

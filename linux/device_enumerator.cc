@@ -108,7 +108,7 @@ std::vector<DeviceInfo> DeviceEnumerator::EnumerateDevices() {
       continue;
     }
 
-    // Deduplicate by bus_info — each physical camera may expose multiple nodes.
+    // Deduplicate by bus_info, each physical camera may expose multiple nodes.
     std::string bus(reinterpret_cast<const char*>(cap.bus_info));
     if (!bus.empty() && seen_bus_info.count(bus)) {
       close(fd);
@@ -217,6 +217,6 @@ ResolutionInfo DeviceEnumerator::SelectResolution(
   if (!resolutions.empty()) {
     return resolutions.back();
   }
-  // No resolutions found — return a default and let GStreamer negotiate.
+  // No resolutions found, return a default and let GStreamer negotiate.
   return {640, 480, 30};
 }

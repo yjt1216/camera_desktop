@@ -64,7 +64,7 @@ class Camera {
   void PausePreview();
   void ResumePreview();
 
-  // Starts video recording (silent — no audio).
+  // Starts video recording (silent, no audio).
   void StartVideoRecording(FlMethodCall* method_call);
 
   // Stops video recording and returns the file path.
@@ -118,7 +118,7 @@ class Camera {
 
   std::unique_ptr<RecordHandler> record_handler_;
 
-  // Pending async initialization — stores the FlMethodCall until first frame.
+  // Pending async initialization, stores the FlMethodCall until first frame.
   // Only accessed from the main thread (set in Initialize, cleared in
   // RespondToPendingInit which is always dispatched via g_idle_add to main).
   FlMethodCall* pending_init_call_;

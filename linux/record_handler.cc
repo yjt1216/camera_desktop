@@ -190,7 +190,7 @@ bool RecordHandler::Setup(GstElement* pipeline, GstElement* tee,
     if (SetupAudioBranch(audio_bitrate, &audio_error)) {
       has_audio_ = true;
     } else {
-      // Audio setup failed — log warning but continue without audio.
+      // Audio setup failed, log warning but continue without audio.
       g_warning("Audio setup failed: %s. Recording without audio.",
                 audio_error ? audio_error->message : "unknown error");
       if (audio_error) g_error_free(audio_error);

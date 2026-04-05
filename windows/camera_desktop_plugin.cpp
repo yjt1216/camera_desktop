@@ -22,7 +22,7 @@ void camera_desktop_ffi_release_stream_handle(int64_t stream_handle);
 void camera_desktop_ffi_release_handles_for_camera(Camera* camera);
 
 // ---------------------------------------------------------------------------
-// C export — called by generated_plugin_registrant.cc
+// C export, called by generated_plugin_registrant.cc
 // ---------------------------------------------------------------------------
 
 void CameraDesktopPluginRegisterWithRegistrar(

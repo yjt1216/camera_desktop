@@ -270,7 +270,7 @@ void main() {
         const MediaSettings(resolutionPreset: ResolutionPreset.high),
       );
 
-      // Start the image stream — should use MethodChannel fallback since
+      // Start the image stream, should use MethodChannel fallback since
       // FFI symbols are not available in the test environment.
       final stream = plugin.onStreamedFrameAvailable(cameraId);
       final subscription = stream.listen((_) {});

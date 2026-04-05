@@ -117,7 +117,7 @@ static void handle_create(CameraDesktopPlugin* self,
   if (audio_bitrate < 0) audio_bitrate = 0;
 
   // Extract device path from the camera name.
-  // Format: "Friendly Name (/dev/videoN)" — extract the path in parentheses.
+  // Format: "Friendly Name (/dev/videoN)", extract the path in parentheses.
   std::string name_str(camera_name);
   std::string device_path;
   size_t paren_start = name_str.rfind('(');

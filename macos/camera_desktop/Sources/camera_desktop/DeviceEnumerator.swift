@@ -45,7 +45,7 @@ class DeviceEnumerator {
     /// Lower = higher priority (appears first in the list).
     ///   0 = built-in camera (preferred)
     ///   1 = other/external camera
-    ///   2 = Continuity Camera (least preferred — often causes grey frames)
+    ///   2 = Continuity Camera (least preferred, often causes grey frames)
     private static func sortScore(for device: AVCaptureDevice) -> Int {
         // macOS 14+: AVCaptureDevice.DeviceType.continuityCamera is available
         if #available(macOS 14.0, *) {

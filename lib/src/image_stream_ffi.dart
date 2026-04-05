@@ -77,7 +77,7 @@ typedef _UnregisterCallbackDart = void Function(int streamHandle);
 ///
 /// Instead of receiving frame data through MethodChannel serialization
 /// (3 copies per frame), this reads directly from a native shared buffer
-/// via dart:ffi (1 copy per frame — into a Dart-owned Uint8List).
+/// via dart:ffi (1 copy per frame, into a Dart-owned Uint8List).
 ///
 /// If FFI setup fails (symbols not found, library not loadable), returns
 /// null from [tryCreate] and the caller falls back to MethodChannel.
@@ -210,7 +210,7 @@ class ImageStreamFfi {
   /// Reads the shared buffer, skips duplicate
   /// frames by comparing sequence numbers, creates a zero-copy view over
   /// the native pixel buffer, then copies into a Dart-owned [Uint8List]
-  /// (1 copy — required by the platform interface contract).
+  /// (1 copy, required by the platform interface contract).
   void _readLatestFrame() {
     final controller = _controller;
     if (controller == null || controller.isClosed) return;

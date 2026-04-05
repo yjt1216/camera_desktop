@@ -33,7 +33,7 @@ dependencies:
   camera_desktop: ^0.0.8
 ```
 
-That's it. All three desktop platforms are covered — no additional packages needed.
+That's it. All three desktop platforms are covered, no additional packages needed.
 
 ## Usage
 
@@ -74,7 +74,7 @@ final controller = CameraController(
 ```
 
 These settings are applied during `initialize()`. To change them you must
-`dispose()` the controller and create a new one — see [Limitations](#limitations).
+`dispose()` the controller and create a new one, see [Limitations](#limitations).
 
 ## Platform-Specific Setup
 
@@ -161,7 +161,7 @@ if (Platform.isWindows) {
 }
 ```
 
-The same applies to video playback — recorded files from macOS/Linux are already
+The same applies to video playback. Recorded files from macOS/Linux are already
 mirrored, while Windows recordings need a Flutter-side flip if you want a
 mirror-style playback.
 

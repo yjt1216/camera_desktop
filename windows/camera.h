@@ -76,7 +76,7 @@ class Camera : public std::enable_shared_from_this<Camera> {
   void Dispose();
   bool IsDisposedOrDisposing() const;
 
-  // Called from COM callbacks — must be public.
+  // Called from COM callbacks, must be public.
   void OnEngineEvent(IMFMediaEvent* event);
   void OnPreviewSample(IMFSample* sample);
 

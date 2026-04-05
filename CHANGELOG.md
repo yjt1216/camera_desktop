@@ -1,3 +1,7 @@
+## 1.0.8
+
+* Fix macOS build failure on Xcode 26+ by removing unavailable `AVCaptureSessionInterruptionReasonKey` (iOS-only API)
+
 ## 1.0.7
 
 * Fix camera initialization failure on Intel Macs by selecting session preset after device discovery using `device.supportsSessionPreset()` with automatic fallback (1080p → 720p → high → medium)

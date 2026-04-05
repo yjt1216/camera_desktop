@@ -403,8 +403,7 @@ class CameraSession: NSObject {
     }
 
     @objc private func sessionWasInterrupted(_ notification: Notification) {
-        let reasonValue = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int ?? -1
-        let reason = AVCaptureSession.InterruptionReason(rawValue: reasonValue)?.debugDescription ?? "reason=\(reasonValue)"
+        let reason = "unknown"
         print("[camera_desktop] AVCaptureSessionWasInterrupted: \(reason)")
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }

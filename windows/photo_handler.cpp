@@ -135,6 +135,6 @@ std::wstring PhotoHandler::GeneratePath(int camera_id) {
   ss << temp_dir << L"camera_desktop_" << camera_id << L"_" << now << L".jpg";
   std::wstring path = ss.str();
   DebugLog("PhotoHandler::GeneratePath: camera_id=" + std::to_string(camera_id) +
-           " path=" + std::string(path.begin(), path.end()));
+           " path=" + WideToUtf8(path));
   return path;
 }

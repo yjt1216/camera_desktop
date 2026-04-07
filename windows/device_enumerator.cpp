@@ -16,16 +16,6 @@ using Microsoft::WRL::ComPtr;
 // Helpers
 // ---------------------------------------------------------------------------
 
-static std::string WideToUtf8(const std::wstring& w) {
-  if (w.empty()) return {};
-  int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(),
-                                 nullptr, 0, nullptr, nullptr);
-  std::string s(size, '\0');
-  WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(),
-                      s.data(), size, nullptr, nullptr);
-  return s;
-}
-
 static std::wstring Utf8ToWide(const std::string& s) {
   if (s.empty()) return {};
   int size = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(),

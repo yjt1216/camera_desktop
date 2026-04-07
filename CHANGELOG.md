@@ -1,3 +1,8 @@
+## 1.1.2
+
+* Fix macOS build failure on Xcode 26+ by removing unavailable `AVCaptureSessionInterruptionReasonKey` (re-introduced in 1.1.1)
+* Fix Windows build failure caused by implicit `wchar_t` to `char` conversion in debug logging
+
 ## 1.1.1
 
 * Add comprehensive diagnostic logging across all platforms (Linux, macOS, Windows)

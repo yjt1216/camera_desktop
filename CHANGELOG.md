@@ -1,3 +1,8 @@
+## 1.1.1
+
+* Add comprehensive diagnostic logging across all platforms (Linux, macOS, Windows)
+* Log device enumeration, backend selection, pipeline construction, resolution selection, recording lifecycle, and error paths
+
 ## 1.1.0
 
 * Add PipeWire camera portal support for Flatpak sandbox compatibility on Linux

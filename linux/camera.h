@@ -13,6 +13,11 @@
 #include "device_enumerator.h"
 #include "record_handler.h"
 
+enum class CameraBackend {
+  kV4L2,       // Traditional /dev/video* + v4l2src
+  kPipeWire,   // Portal-authorized pipewiresrc
+};
+
 enum class CameraState {
   kCreated,
   kInitializing,
@@ -34,6 +39,8 @@ struct CameraConfig {
   int target_fps;
   int target_bitrate;
   int audio_bitrate = 0;
+  CameraBackend backend = CameraBackend::kV4L2;
+  int pw_fd = -1;  // PipeWire remote fd (only used when backend == kPipeWire)
 };
 
 class Camera {

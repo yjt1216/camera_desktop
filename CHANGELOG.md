@@ -1,3 +1,12 @@
+## 1.1.0
+
+* Add PipeWire camera portal support for Flatpak sandbox compatibility on Linux
+* Automatically detect Flatpak environment and use `pipewiresrc` instead of `v4l2src`
+* Request camera access via `org.freedesktop.portal.Camera` D-Bus interface
+* Enumerate PipeWire camera nodes via `GstDeviceMonitor`
+* Fall back to V4L2 if portal is unavailable or user denies permission
+* No new build dependencies — uses GIO (D-Bus) and GStreamer APIs already linked
+
 ## 1.0.8
 
 * Fix macOS build failure on Xcode 26+ by removing unavailable `AVCaptureSessionInterruptionReasonKey` (iOS-only API)

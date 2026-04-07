@@ -11,6 +11,7 @@
 
 #include "camera.h"
 #include "device_enumerator.h"
+#include "pipewire_portal.h"
 
 int64_t camera_desktop_ffi_register_stream_handle(Camera* camera);
 void camera_desktop_ffi_release_stream_handle(int64_t stream_handle);
@@ -20,6 +21,8 @@ void camera_desktop_ffi_release_handles_for_camera(Camera* camera);
 struct PluginData {
   std::map<int, std::unique_ptr<Camera>> cameras;
   int next_camera_id = 1;
+  std::unique_ptr<PipeWirePortal> portal;
+  bool use_pipewire = false;
 };
 
 #define CAMERA_DESKTOP_PLUGIN(obj) \
@@ -37,31 +40,46 @@ G_DEFINE_TYPE(CameraDesktopPlugin, camera_desktop_plugin, g_object_get_type())
 
 // --- Method handlers ---
 
-static void handle_available_cameras(CameraDesktopPlugin* self,
-                                     FlMethodCall* method_call) {
-  auto devices = DeviceEnumerator::EnumerateDevices();
-
+// Builds the Flutter response list from a vector of DeviceInfo.
+static void respond_with_devices(FlMethodCall* method_call,
+                                 const std::vector<DeviceInfo>& devices) {
   g_autoptr(FlValue) result = fl_value_new_list();
   for (const auto& device : devices) {
     g_autoptr(FlValue) entry = fl_value_new_map();
+    // Format: "Friendly Name (/dev/videoN)" or "Friendly Name (pw:42)"
+    std::string display_name =
+        device.name + " (" + device.device_path + ")";
     fl_value_set_string_take(entry, "name",
-                             fl_value_new_string(device.name.c_str()));
+                             fl_value_new_string(display_name.c_str()));
     fl_value_set_string_take(entry, "lensDirection",
                              fl_value_new_int(device.lens_direction));
     fl_value_set_string_take(entry, "sensorOrientation",
                              fl_value_new_int(device.sensor_orientation));
-    // Also pass the device path so Dart can pass it back in create().
-    // The CameraDescription.name field will carry this.
-    // Override name to include both friendly name and path for disambiguation.
-    // Format: "Friendly Name (/dev/videoN)"
-    std::string display_name =
-        device.name + " (" + device.device_path + ")";
-    fl_value_set_string(entry, "name",
-                        fl_value_new_string(display_name.c_str()));
     fl_value_append(result, entry);
   }
-
   fl_method_call_respond_success(method_call, result, nullptr);
+}
+
+static void handle_available_cameras(CameraDesktopPlugin* self,
+                                     FlMethodCall* method_call) {
+  if (self->data->use_pipewire && self->data->portal) {
+    // Async path: request portal permission, enumerate PipeWire nodes.
+    g_object_ref(method_call);
+    self->data->portal->EnumerateDevicesAsync(
+        [self, method_call](std::vector<DeviceInfo> devices) {
+          // If portal returned no devices, fall back to V4L2.
+          if (devices.empty()) {
+            devices = DeviceEnumerator::EnumerateDevices();
+          }
+          respond_with_devices(method_call, devices);
+          g_object_unref(method_call);
+        });
+    return;
+  }
+
+  // V4L2 path (synchronous, for native Linux installs).
+  auto devices = DeviceEnumerator::EnumerateDevices();
+  respond_with_devices(method_call, devices);
 }
 
 static void handle_get_platform_capabilities(FlMethodCall* method_call) {
@@ -130,7 +148,11 @@ static void handle_create(CameraDesktopPlugin* self,
     device_path = name_str;
   }
 
-  if (device_path.empty() || device_path.find("/dev/") != 0) {
+  // Detect backend from device path prefix.
+  CameraBackend backend = CameraBackend::kV4L2;
+  if (device_path.size() > 3 && device_path.substr(0, 3) == "pw:") {
+    backend = CameraBackend::kPipeWire;
+  } else if (device_path.empty() || device_path.find("/dev/") != 0) {
     g_autoptr(FlValue) details = fl_value_new_null();
     fl_method_call_respond_error(method_call, "invalid_camera_name",
                                  "Could not extract device path from camera name",
@@ -138,8 +160,13 @@ static void handle_create(CameraDesktopPlugin* self,
     return;
   }
 
-  // Enumerate resolutions and select the best match for the preset.
-  auto resolutions = DeviceEnumerator::EnumerateResolutions(device_path);
+  // Enumerate resolutions based on backend.
+  std::vector<ResolutionInfo> resolutions;
+  if (backend == CameraBackend::kPipeWire) {
+    resolutions = PipeWirePortal::GetDefaultResolutions();
+  } else {
+    resolutions = DeviceEnumerator::EnumerateResolutions(device_path);
+  }
   auto selected = DeviceEnumerator::SelectResolution(resolutions,
                                                      resolution_preset);
 
@@ -152,6 +179,10 @@ static void handle_create(CameraDesktopPlugin* self,
   config.target_fps = target_fps > 0 ? target_fps : selected.max_fps;
   config.target_bitrate = target_bitrate;
   config.audio_bitrate = audio_bitrate;
+  config.backend = backend;
+  if (backend == CameraBackend::kPipeWire && self->data->portal) {
+    config.pw_fd = self->data->portal->pw_fd();
+  }
 
   int camera_id = self->data->next_camera_id++;
   auto camera = std::make_unique<Camera>(
@@ -357,6 +388,10 @@ static void camera_desktop_plugin_class_init(CameraDesktopPluginClass* klass) {
 
 static void camera_desktop_plugin_init(CameraDesktopPlugin* self) {
   self->data = new PluginData();
+  self->data->use_pipewire = PipeWirePortal::ShouldUsePipeWire();
+  if (self->data->use_pipewire) {
+    self->data->portal = std::make_unique<PipeWirePortal>();
+  }
 }
 
 void camera_desktop_plugin_register_with_registrar(

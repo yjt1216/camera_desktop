@@ -13,6 +13,7 @@ list(APPEND PLUGIN_SOURCES
   "photo_handler.cc"
   "record_handler.cc"
   "image_stream_ffi.cc"
+  "pipewire_portal.cc"
 )
 
 add_library(${PLUGIN_NAME} SHARED

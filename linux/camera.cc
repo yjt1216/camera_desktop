@@ -92,20 +92,40 @@ void Camera::Initialize(FlMethodCall* method_call) {
 
 bool Camera::BuildPipeline(GError** error) {
   // Build pipeline with a tee to support branching for recording:
-  //   v4l2src ! videoconvert ! caps ! tee name=t
+  //   [source] ! videoconvert ! caps ! tee name=t
   //     t. ! queue ! appsink (preview)
   //     t. ! [recording branch, added later by RecordHandler]
-  gchar* pipeline_str = g_strdup_printf(
-      "v4l2src device=%s "
-      "! videoconvert "
-      "! videoflip name=flip method=horizontal-flip "
-      "! video/x-raw,format=RGBA,width=%d,height=%d,framerate=%d/1 "
-      "! tee name=t "
-      "t. ! queue name=preview_queue ! "
-      "appsink name=sink emit-signals=true max-buffers=2 drop=true "
-      "sync=false",
-      config_.device_path.c_str(), config_.target_width,
-      config_.target_height, config_.target_fps);
+  gchar* pipeline_str = nullptr;
+
+  if (config_.backend == CameraBackend::kPipeWire) {
+    // PipeWire portal path: use pipewiresrc with the portal-provided fd.
+    // Extract node id from "pw:<id>" device_path.
+    std::string pw_node_id = config_.device_path.substr(3);
+    pipeline_str = g_strdup_printf(
+        "pipewiresrc fd=%d path=%s do-timestamp=true "
+        "! videoconvert "
+        "! videoflip name=flip method=horizontal-flip "
+        "! video/x-raw,format=RGBA,width=%d,height=%d,framerate=%d/1 "
+        "! tee name=t "
+        "t. ! queue name=preview_queue ! "
+        "appsink name=sink emit-signals=true max-buffers=2 drop=true "
+        "sync=false",
+        config_.pw_fd, pw_node_id.c_str(),
+        config_.target_width, config_.target_height, config_.target_fps);
+  } else {
+    // V4L2 path (default for native Linux installs).
+    pipeline_str = g_strdup_printf(
+        "v4l2src device=%s "
+        "! videoconvert "
+        "! videoflip name=flip method=horizontal-flip "
+        "! video/x-raw,format=RGBA,width=%d,height=%d,framerate=%d/1 "
+        "! tee name=t "
+        "t. ! queue name=preview_queue ! "
+        "appsink name=sink emit-signals=true max-buffers=2 drop=true "
+        "sync=false",
+        config_.device_path.c_str(), config_.target_width,
+        config_.target_height, config_.target_fps);
+  }
 
   pipeline_ = gst_parse_launch(pipeline_str, error);
   g_free(pipeline_str);

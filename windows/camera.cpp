@@ -222,11 +222,14 @@ int64_t Camera::RegisterTexture() {
 
 uint32_t Camera::MaxPreviewHeightForPreset() const {
   switch (config_.resolution_preset) {
+    // Matches Linux/macOS expectations & Dart labels:
+    // low=240p, medium=480p, high=720p, veryHigh=1080p, ultraHigh=2160p, max=unlimited
     case 0:  return 240;
     case 1:  return 480;
     case 2:  return 720;
-    case 3:  return 720;
-    case 4:  return 1080;
+    case 3:  return 1080;
+    case 4:  return 2160;
+    case 5:  return 0xFFFFFFFF;
     default: return 0xFFFFFFFF;
   }
 }
@@ -534,8 +537,9 @@ HRESULT Camera::StartPreviewInternal() {
   preview_type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
 
   // Add stream + attach sample callback.
-  ComPtr<IMFCaptureEngineOnSampleCallback> sample_cb(
-      new PreviewSampleCallback(weak_from_this()));
+  preview_sample_cb_ =
+      ComPtr<IMFCaptureEngineOnSampleCallback>(
+          new PreviewSampleCallback(weak_from_this()));
 
   DWORD stream_index = 0;
   hr = preview_sink_->AddStream(
@@ -545,8 +549,9 @@ HRESULT Camera::StartPreviewInternal() {
     DebugLog("StartPreviewInternal: AddStream failed " + HrToString(hr));
     return hr;
   }
+  preview_stream_index_ = stream_index;
 
-  hr = preview_sink_->SetSampleCallback(stream_index, sample_cb.Get());
+  hr = preview_sink_->SetSampleCallback(stream_index, preview_sample_cb_.Get());
   if (FAILED(hr)) {
     DebugLog("StartPreviewInternal: SetSampleCallback failed " + HrToString(hr));
     return hr;
@@ -708,6 +713,23 @@ void Camera::OnEngineEvent(IMFMediaEvent* event) {
       record_handler_.reset();
       if (r) r->Error("recording_failed", "Failed to start recording");
     } else {
+      // Some devices stop delivering preview samples after recording starts.
+      // Re-bind the sample callback & nudge the engine to keep preview alive.
+      if (preview_sink_ && preview_sample_cb_) {
+        HRESULT cb_hr = preview_sink_->SetSampleCallback(
+            preview_stream_index_, preview_sample_cb_.Get());
+        if (FAILED(cb_hr)) {
+          DebugLog("Camera::OnEngineEvent RECORD_STARTED: re-SetSampleCallback failed (non-fatal) " +
+                   HrToString(cb_hr));
+        }
+      }
+      if (capture_engine_) {
+        HRESULT prev_hr = capture_engine_->StartPreview();
+        if (FAILED(prev_hr)) {
+          DebugLog("Camera::OnEngineEvent RECORD_STARTED: StartPreview failed (non-fatal) " +
+                   HrToString(prev_hr));
+        }
+      }
       if (record_handler_) record_handler_->OnRecordStarted();
       if (r) r->Success(flutter::EncodableValue(nullptr));
     }
@@ -825,6 +847,11 @@ void Camera::OnPreviewSample(IMFSample* sample) {
   if (!copied) return;
 
   BYTE* data = packed_frame_.data();
+
+  const uint64_t n = preview_frame_counter_.fetch_add(1) + 1;
+  if ((n % 30) == 0) {
+    DebugLog("Camera::OnPreviewSample frame=" + std::to_string(n));
+  }
 
   // Snapshot for photo capture (natural BGRA, mirroring handled in Flutter).
   {

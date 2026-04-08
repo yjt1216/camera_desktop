@@ -35,7 +35,9 @@ enum class CameraState {
 
 struct CameraConfig {
   std::wstring symbolic_link;
-  int  resolution_preset = 4;  // 0=low … 4=max
+  // Matches Dart ResolutionPreset enum order:
+  // 0=low, 1=medium, 2=high, 3=veryHigh, 4=ultraHigh, 5=max
+  int  resolution_preset = 5;
   bool enable_audio      = false;
   int  target_fps        = 30;
   int  target_bitrate    = 0;  // <=0 means use dynamic default ladder.
@@ -117,6 +119,9 @@ class Camera : public std::enable_shared_from_this<Camera> {
   ComPtr<ID3D11Device>          dx11_device_;
   ComPtr<IMFDXGIDeviceManager>  dxgi_device_manager_;
   UINT                          dx_device_reset_token_ = 0;
+  // Keep sample callback alive for the lifetime of preview.
+  ComPtr<IMFCaptureEngineOnSampleCallback> preview_sample_cb_;
+  DWORD preview_stream_index_ = 0;
 
   // Negotiated media types (set in FindBaseMediaTypes before preview starts).
   ComPtr<IMFMediaType> base_preview_media_type_;
@@ -137,6 +142,7 @@ class Camera : public std::enable_shared_from_this<Camera> {
   std::atomic<bool> first_frame_received_{false};
   std::atomic<bool> preview_paused_{false};
   std::atomic<bool> image_streaming_{false};
+  std::atomic<uint64_t> preview_frame_counter_{0};
 
   // ── Latest frame for photo capture (natural BGRA) ─────────────────────
   std::vector<uint8_t> latest_frame_;

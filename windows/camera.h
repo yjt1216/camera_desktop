@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -42,6 +43,9 @@ struct CameraConfig {
   int  target_fps        = 30;
   int  target_bitrate    = 0;  // <=0 means use dynamic default ladder.
   int  audio_bitrate     = 0;
+  /// When true (default), if no format fits under the preset height hint, pick
+  /// the smallest height above that hint (e.g. only 1080p when asking for 720p).
+  bool allow_upscale_to_only_available = true;
 };
 
 class Camera : public std::enable_shared_from_this<Camera> {
@@ -57,10 +61,12 @@ class Camera : public std::enable_shared_from_this<Camera> {
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
   void TakePicture(
-      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+      std::optional<std::wstring> output_path = std::nullopt);
 
   void StartVideoRecording(
-      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+      std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+      std::optional<std::wstring> output_path = std::nullopt);
   void StopVideoRecording(
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 

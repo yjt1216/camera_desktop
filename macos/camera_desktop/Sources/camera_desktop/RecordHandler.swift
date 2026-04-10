@@ -25,7 +25,8 @@ class RecordHandler: NSObject {
                         targetFps: Int,
                         targetBitrate: Int,
                         audioBitrate: Int = 0,
-                        enableAudio: Bool) throws -> String {
+                        enableAudio: Bool,
+                        outputPath: String? = nil) throws -> String {
         lock.lock()
         if isRecording {
             lock.unlock()
@@ -34,7 +35,7 @@ class RecordHandler: NSObject {
         }
         lock.unlock()
 
-        let path = RecordHandler.generatePath()
+        let path = outputPath ?? RecordHandler.generatePath()
         let url = URL(fileURLWithPath: path)
 
         // Remove any stale file at this path.

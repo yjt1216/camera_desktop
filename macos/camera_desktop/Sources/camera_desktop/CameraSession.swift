@@ -252,19 +252,27 @@ class CameraSession: NSObject {
         videoDevice = device
         print("[camera_desktop] Device found: uniqueID=\(device.uniqueID) deviceType=\(device.deviceType.rawValue) position=\(device.position.rawValue)")
 
-        // Select preset based on what the device actually supports.
+        // Select preset: [ResolutionPreset] is a soft target; negotiate closest supported mode.
         let desiredPreset = DeviceEnumerator.sessionPreset(for: config.resolutionPreset)
-        let fallbackPresets: [AVCaptureSession.Preset] = [.hd1920x1080, .hd1280x720, .high, .medium]
+        let candidates = DeviceEnumerator.presetCandidates(startingFrom: desiredPreset)
         var chosenPreset: AVCaptureSession.Preset = .medium
         var usedFallback = false
-        if device.supportsSessionPreset(desiredPreset) && session.canSetSessionPreset(desiredPreset) {
-            chosenPreset = desiredPreset
-        } else {
-            usedFallback = true
-            print("[camera_desktop] Preset \(desiredPreset.rawValue) not supported by device, trying fallback")
-            for fp in fallbackPresets {
-                if device.supportsSessionPreset(fp) && session.canSetSessionPreset(fp) {
-                    chosenPreset = fp
+        var found = false
+        for p in candidates {
+            if device.supportsSessionPreset(p) && session.canSetSessionPreset(p) {
+                chosenPreset = p
+                usedFallback = (p != desiredPreset)
+                found = true
+                break
+            }
+        }
+        if !found {
+            print("[camera_desktop] Preset chain failed for desired=\(desiredPreset.rawValue), scanning rank order")
+            for p in DeviceEnumerator.presetCandidates(startingFrom: .low) {
+                if device.supportsSessionPreset(p) && session.canSetSessionPreset(p) {
+                    chosenPreset = p
+                    usedFallback = true
+                    found = true
                     break
                 }
             }
@@ -436,7 +444,7 @@ class CameraSession: NSObject {
 
     // MARK: - Photo Capture
 
-    func takePicture(result: @escaping FlutterResult) {
+    func takePicture(outputPath: String?, result: @escaping FlutterResult) {
         bufferLock.lock()
         let buffer = latestBuffer
         bufferLock.unlock()
@@ -449,7 +457,7 @@ class CameraSession: NSObject {
             return
         }
 
-        let path = PhotoHandler.generatePath(cameraId: cameraId)
+        let path = outputPath ?? PhotoHandler.generatePath(cameraId: cameraId)
         print("[camera_desktop] takePicture: writing photo to path=\(path)")
         sessionQueue.async {
             let success = PhotoHandler.takePicture(from: buffer, outputPath: path)
@@ -469,7 +477,7 @@ class CameraSession: NSObject {
 
     // MARK: - Video Recording
 
-    func startVideoRecording(result: @escaping FlutterResult) {
+    func startVideoRecording(outputPath: String?, result: @escaping FlutterResult) {
         let enableAudio = config.enableAudio
 
         sessionQueue.async { [self] in
@@ -480,7 +488,8 @@ class CameraSession: NSObject {
                     targetFps: self.config.targetFps,
                     targetBitrate: self.config.targetBitrate,
                     audioBitrate: self.config.audioBitrate,
-                    enableAudio: enableAudio
+                    enableAudio: enableAudio,
+                    outputPath: outputPath
                 )
                 print("[camera_desktop] Recording started: path=\(path)")
                 DispatchQueue.main.async { result(nil) }

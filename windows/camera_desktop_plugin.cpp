@@ -9,12 +9,31 @@
 #include <objbase.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <cstdint>
 
 #include "device_enumerator.h"
 #include "logging.h"
+
+namespace {
+
+std::optional<std::wstring> Utf8OutputPathFromArgs(
+    const flutter::EncodableMap& args) {
+  auto it = args.find(flutter::EncodableValue("outputPath"));
+  if (it == args.end()) return std::nullopt;
+  const std::string* utf8 = std::get_if<std::string>(&it->second);
+  if (!utf8 || utf8->empty()) return std::nullopt;
+  int n = MultiByteToWideChar(CP_UTF8, 0, utf8->data(), (int)utf8->size(),
+                              nullptr, 0);
+  if (n <= 0) return std::nullopt;
+  std::wstring w(n, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8->data(), (int)utf8->size(), w.data(), n);
+  return w;
+}
+
+}  // namespace
 
 CameraDesktopPlugin* CameraDesktopPlugin::instance_ = nullptr;
 
@@ -249,11 +268,20 @@ void CameraDesktopPlugin::HandleCreate(
   }
   if (audio_bitrate < 0) audio_bitrate = 0;
 
+  bool allow_upscale = true;
+  auto upscale_it = args.find(flutter::EncodableValue("allowUpscaleToOnlyAvailable"));
+  if (upscale_it != args.end()) {
+    if (const bool* b = std::get_if<bool>(&upscale_it->second)) {
+      allow_upscale = *b;
+    }
+  }
+
   DebugLog("HandleCreate: camera_name=" + *camera_name +
            " preset=" + std::to_string(resolution_preset) +
            " audio=" + std::string(enable_audio ? "yes" : "no") +
            " fps=" + std::to_string(target_fps) +
-           " bitrate=" + std::to_string(target_bitrate));
+           " bitrate=" + std::to_string(target_bitrate) +
+           " allow_upscale=" + std::string(allow_upscale ? "yes" : "no"));
 
   std::wstring symbolic_link = DeviceEnumerator::FindSymbolicLink(*camera_name);
   if (symbolic_link.empty()) {
@@ -270,6 +298,7 @@ void CameraDesktopPlugin::HandleCreate(
   config.target_fps = target_fps;
   config.target_bitrate = target_bitrate;
   config.audio_bitrate = audio_bitrate;
+  config.allow_upscale_to_only_available = allow_upscale;
 
   int camera_id = next_camera_id_++;
   DebugLog("HandleCreate: assigning camera_id=" + std::to_string(camera_id));
@@ -344,7 +373,7 @@ void CameraDesktopPlugin::HandleTakePicture(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   auto camera = FindCamera(args, result.get());
   if (!camera) return;
-  camera->TakePicture(std::move(result));
+  camera->TakePicture(std::move(result), Utf8OutputPathFromArgs(args));
 }
 
 void CameraDesktopPlugin::HandleStartVideoRecording(
@@ -352,7 +381,7 @@ void CameraDesktopPlugin::HandleStartVideoRecording(
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
   auto camera = FindCamera(args, result.get());
   if (!camera) return;
-  camera->StartVideoRecording(std::move(result));
+  camera->StartVideoRecording(std::move(result), Utf8OutputPathFromArgs(args));
 }
 
 void CameraDesktopPlugin::HandleStopVideoRecording(

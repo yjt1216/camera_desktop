@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 static const guint kInitTimeoutMs = 8000;
 
@@ -491,13 +492,24 @@ void Camera::TakePicture(FlMethodCall* method_call) {
     return;
   }
 
-  // Generate a unique temporary file path using an atomic sequence counter
-  // rather than the wall clock to prevent collisions under NTP corrections.
-  static std::atomic<int64_t> capture_seq{0};
-  gchar* tmp_path =
-      g_strdup_printf("%s/camera_desktop_%d_%" G_GINT64_FORMAT ".jpg",
-                      g_get_tmp_dir(), camera_id_,
-                      capture_seq.fetch_add(1, std::memory_order_relaxed));
+  FlValue* call_args = fl_method_call_get_args(method_call);
+  FlValue* out_val = fl_value_lookup_string(call_args, "outputPath");
+  std::string output_path_str;
+  if (out_val && fl_value_get_type(out_val) == FL_VALUE_TYPE_STRING) {
+    const char* custom = fl_value_get_string(out_val);
+    if (custom && custom[0]) {
+      output_path_str = custom;
+    }
+  }
+  if (output_path_str.empty()) {
+    static std::atomic<int64_t> capture_seq{0};
+    gchar* tmp_path =
+        g_strdup_printf("%s/camera_desktop_%d_%" G_GINT64_FORMAT ".jpg",
+                        g_get_tmp_dir(), camera_id_,
+                        capture_seq.fetch_add(1, std::memory_order_relaxed));
+    output_path_str = tmp_path;
+    g_free(tmp_path);
+  }
 
   // C-7: gst_video_convert_sample performs synchronous JPEG encoding which
   // can take 30–200 ms at 1080p. Offload to a GLib thread-pool task so the
@@ -515,10 +527,9 @@ void Camera::TakePicture(FlMethodCall* method_call) {
 
   auto* d = new TakePictureData();
   d->appsink = GST_ELEMENT(gst_object_ref(appsink_));
-  d->output_path = tmp_path;
+  d->output_path = std::move(output_path_str);
   d->success = false;
   d->method_call = FL_METHOD_CALL(g_object_ref(method_call));
-  g_free(tmp_path);
 
   GTask* task = g_task_new(nullptr, nullptr, nullptr, nullptr);
   g_task_set_task_data(task, d, nullptr);
@@ -598,28 +609,37 @@ void Camera::StartVideoRecording(FlMethodCall* method_call) {
     }
   }
 
-  // H-6: derive extension from the muxer that was actually selected so the
-  // file's extension always matches its container format.
-  static std::atomic<int64_t> rec_seq{0};
-  gchar* tmp_path = g_strdup_printf(
-      "%s/camera_desktop_%d_%" G_GINT64_FORMAT ".%s",
-      g_get_tmp_dir(), camera_id_,
-      rec_seq.fetch_add(1, std::memory_order_relaxed),
-      record_handler_->output_extension());
+  FlValue* call_args = fl_method_call_get_args(method_call);
+  FlValue* out_val = fl_value_lookup_string(call_args, "outputPath");
+  std::string path_str;
+  if (out_val && fl_value_get_type(out_val) == FL_VALUE_TYPE_STRING) {
+    const char* custom = fl_value_get_string(out_val);
+    if (custom && custom[0]) {
+      path_str = custom;
+    }
+  }
+  if (path_str.empty()) {
+    static std::atomic<int64_t> rec_seq{0};
+    gchar* tmp_path = g_strdup_printf(
+        "%s/camera_desktop_%d_%" G_GINT64_FORMAT ".%s",
+        g_get_tmp_dir(), camera_id_,
+        rec_seq.fetch_add(1, std::memory_order_relaxed),
+        record_handler_->output_extension());
+    path_str = tmp_path;
+    g_free(tmp_path);
+  }
 
   GError* error = nullptr;
-  if (!record_handler_->StartRecording(tmp_path, &error)) {
+  if (!record_handler_->StartRecording(path_str, &error)) {
     g_autoptr(FlValue) details = fl_value_new_null();
     fl_method_call_respond_error(
         method_call, "recording_start_failed",
         error ? error->message : "Failed to start recording", details,
         nullptr);
     if (error) g_error_free(error);
-    g_free(tmp_path);
     return;
   }
 
-  g_free(tmp_path);
   fl_method_call_respond_success(method_call, fl_value_new_null(), nullptr);
 }
 

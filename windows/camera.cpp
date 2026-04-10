@@ -95,6 +95,87 @@ class PreviewSampleCallback final
 namespace {
 
 // Finds the best available device media type for the given stream that is
+// strictly above floor_height and at or above min_framerate.
+// Prefers the smallest height (closest upscale to the preset); ties broken by
+// larger pixel count, then higher frame rate.
+bool FindSmallestMediaTypeAboveFloor(DWORD stream_index, IMFCaptureSource* source,
+                                     IMFMediaType** out_type,
+                                     uint32_t floor_height,
+                                     uint32_t* out_width, uint32_t* out_height,
+                                     float* out_fps = nullptr,
+                                     float min_framerate = 15.0f) {
+  DebugLog("FindSmallestMediaTypeAboveFloor: stream=" +
+           std::to_string(stream_index) +
+           " floor_height=" + std::to_string(floor_height) +
+           " min_fps=" + std::to_string(static_cast<int>(min_framerate)));
+
+  ComPtr<IMFMediaType> best;
+  uint32_t best_w = 0, best_h = 0;
+  float best_fps = 0.0f;
+  int examined = 0;
+
+  for (int i = 0;; ++i) {
+    ComPtr<IMFMediaType> type;
+    if (FAILED(source->GetAvailableDeviceMediaType(stream_index, i, &type)))
+      break;
+    ++examined;
+
+    UINT32 num = 0, den = 1;
+    if (FAILED(MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &num, &den)) ||
+        den == 0) {
+      continue;
+    }
+    float fps = static_cast<float>(num) / static_cast<float>(den);
+    if (fps < min_framerate) {
+      continue;
+    }
+
+    UINT32 w = 0, h = 0;
+    if (FAILED(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &w, &h))) {
+      continue;
+    }
+    if (h <= floor_height) {
+      continue;
+    }
+
+    uint64_t area = static_cast<uint64_t>(w) * static_cast<uint64_t>(h);
+    uint64_t best_area = static_cast<uint64_t>(best_w) * static_cast<uint64_t>(best_h);
+    bool pick = false;
+    if (!best) {
+      pick = true;
+    } else if (h < best_h) {
+      pick = true;
+    } else if (h == best_h) {
+      if (area > best_area) {
+        pick = true;
+      } else if (area == best_area && fps > best_fps) {
+        pick = true;
+      }
+    }
+
+    if (pick) {
+      type.CopyTo(&best);
+      best_w = w;
+      best_h = h;
+      best_fps = fps;
+    }
+  }
+
+  DebugLog("FindSmallestMediaTypeAboveFloor: examined " + std::to_string(examined) +
+           " type(s), best=" +
+           (best ? std::to_string(best_w) + "x" + std::to_string(best_h) +
+                       "@" + std::to_string(static_cast<int>(best_fps + 0.5f)) + "fps"
+                 : "none"));
+
+  if (!best) return false;
+  best.CopyTo(out_type);
+  if (out_width) *out_width = best_w;
+  if (out_height) *out_height = best_h;
+  if (out_fps) *out_fps = best_fps;
+  return true;
+}
+
+// Finds the best available device media type for the given stream that is
 // at or below max_height and at or above min_framerate.
 // Prefers higher resolution; among equal resolutions, higher frame rate.
 bool FindBestMediaType(DWORD stream_index, IMFCaptureSource* source,
@@ -222,6 +303,7 @@ int64_t Camera::RegisterTexture() {
 
 uint32_t Camera::MaxPreviewHeightForPreset() const {
   switch (config_.resolution_preset) {
+    // Soft height hints for format *preference* (not a hard output cap); see README.
     // Matches Linux/macOS expectations & Dart labels:
     // low=240p, medium=480p, high=720p, veryHigh=1080p, ultraHigh=2160p, max=unlimited
     case 0:  return 240;
@@ -439,12 +521,34 @@ HRESULT Camera::FindBaseMediaTypes() {
   uint32_t max_h = MaxPreviewHeightForPreset();
   DebugLog("FindBaseMediaTypes: preset=" + std::to_string(config_.resolution_preset) +
            " max_height=" + std::to_string(max_h) +
-           " target_fps=" + std::to_string(config_.target_fps));
+           " target_fps=" + std::to_string(config_.target_fps) +
+           " allow_upscale=" +
+           std::string(config_.allow_upscale_to_only_available ? "yes" : "no"));
   uint32_t pw = 0, ph = 0;
 
-  if (!FindBestMediaType(
-          (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW,
-          source.Get(), &base_preview_media_type_, max_h, &pw, &ph)) {
+  const DWORD kPreviewStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_PREVIEW;
+  const DWORD kRecordStream =
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD;
+
+  bool preview_ok = false;
+  for (float min_preview_fps : {15.0f, 5.0f, 1.0f}) {
+    if (FindBestMediaType(kPreviewStream, source.Get(), &base_preview_media_type_,
+                          max_h, &pw, &ph, nullptr, min_preview_fps)) {
+      preview_ok = true;
+      break;
+    }
+    if (config_.allow_upscale_to_only_available && max_h < UINT32_MAX &&
+        FindSmallestMediaTypeAboveFloor(kPreviewStream, source.Get(),
+                                        &base_preview_media_type_, max_h, &pw, &ph,
+                                        nullptr, min_preview_fps)) {
+      DebugLog("FindBaseMediaTypes: preview using upscale-above-preset fallback");
+      preview_ok = true;
+      break;
+    }
+  }
+
+  if (!preview_ok) {
     DebugLog("FindBaseMediaTypes: no suitable preview media type found");
     return E_FAIL;
   }
@@ -457,19 +561,21 @@ HRESULT Camera::FindBaseMediaTypes() {
   const float requested_fps = static_cast<float>(
       config_.target_fps > 0 ? config_.target_fps : 30);
 
-  bool found_record = FindBestMediaType(
-      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-      source.Get(), &base_capture_media_type_, max_record_h, &rw, &rh, &rfps,
-      requested_fps);
-
-  if (!found_record) {
-    // Fallback to a permissive minimum to keep devices with sparse modes usable.
-    DebugLog("FindBaseMediaTypes: first FindBestMediaType (record) failed for fps=" +
-             std::to_string(requested_fps) + ", retrying with min_fps=5.0");
-    found_record = FindBestMediaType(
-        (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_VIDEO_RECORD,
-        source.Get(), &base_capture_media_type_, max_record_h, &rw, &rh, &rfps,
-        5.0f);
+  bool found_record = false;
+  for (float min_record_fps : {requested_fps, 5.0f, 1.0f}) {
+    if (FindBestMediaType(kRecordStream, source.Get(), &base_capture_media_type_,
+                          max_record_h, &rw, &rh, &rfps, min_record_fps)) {
+      found_record = true;
+      break;
+    }
+    if (config_.allow_upscale_to_only_available && max_record_h < UINT32_MAX &&
+        FindSmallestMediaTypeAboveFloor(kRecordStream, source.Get(),
+                                        &base_capture_media_type_, max_record_h, &rw,
+                                        &rh, &rfps, min_record_fps)) {
+      DebugLog("FindBaseMediaTypes: record using upscale-above-preset fallback");
+      found_record = true;
+      break;
+    }
   }
 
   if (!found_record) {
@@ -952,7 +1058,8 @@ void Camera::FailAllPendingResults(const std::string& error) {
 // ============================================================================
 
 void Camera::TakePicture(
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+    std::optional<std::wstring> output_path) {
   {
     std::lock_guard<std::mutex> lk(state_mutex_);
     if (state_ != CameraState::kRunning && state_ != CameraState::kPaused) {
@@ -984,6 +1091,7 @@ void Camera::TakePicture(
   auto* raw_result = result.release();
   const int camera_id = camera_id_;
   std::thread([camera_id, frame_copy = std::move(frame_copy), width, height,
+               output_path = std::move(output_path),
                raw_result]() mutable {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
@@ -992,7 +1100,10 @@ void Camera::TakePicture(
     // Keep saved stills mirror-consistent with the preview UI.
     FlipHorizontal(frame_copy.data(), width, height);
 
-    std::wstring path = PhotoHandler::GeneratePath(camera_id);
+    std::wstring path =
+        output_path.has_value() && !output_path->empty()
+            ? std::move(*output_path)
+            : PhotoHandler::GeneratePath(camera_id);
     DebugLog("TakePicture: writing to " + WstrToUtf8(path));
     std::string  write_error;
     if (PhotoHandler::Write(frame_copy.data(), width, height, path,
@@ -1013,7 +1124,8 @@ void Camera::TakePicture(
 // ============================================================================
 
 void Camera::StartVideoRecording(
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result) {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result,
+    std::optional<std::wstring> output_path) {
   {
     std::lock_guard<std::mutex> lk(state_mutex_);
     if (state_ != CameraState::kRunning && state_ != CameraState::kPaused) {
@@ -1042,13 +1154,16 @@ void Camera::StartVideoRecording(
     return;
   }
 
-  // Generate temp path.
-  WCHAR temp_dir[MAX_PATH];
-  GetTempPathW(MAX_PATH, temp_dir);
-  auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-  std::wostringstream ss;
-  ss << temp_dir << L"camera_desktop_video_" << now << L".mp4";
-  current_record_path_ = ss.str();
+  if (output_path.has_value() && !output_path->empty()) {
+    current_record_path_ = std::move(*output_path);
+  } else {
+    WCHAR temp_dir[MAX_PATH];
+    GetTempPathW(MAX_PATH, temp_dir);
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    std::wostringstream ss;
+    ss << temp_dir << L"camera_desktop_video_" << now << L".mp4";
+    current_record_path_ = ss.str();
+  }
 
   const int effective_fps =
       (config_.target_fps > 0) ? config_.target_fps : (record_fps_ > 0 ? record_fps_ : 30);

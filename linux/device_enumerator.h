@@ -39,9 +39,10 @@ class DeviceEnumerator {
   static std::vector<ResolutionInfo> EnumerateResolutions(
       const std::string& device_path);
 
-  // Picks the best resolution for a given preset from the list of supported
-  // resolutions. Returns the highest resolution whose height fits within
-  // the preset ceiling, with at least 15 FPS.
+  // Picks a resolution using the preset as a soft height preference (not a hard
+  // output cap): prefer the largest mode whose height is at or below the
+  // preset ceiling with usable FPS; if none, relax FPS; if still none, fall back
+  // to the smallest available height (e.g. only 1080p when asking for 720p).
   static ResolutionInfo SelectResolution(
       const std::vector<ResolutionInfo>& resolutions,
       int preset);

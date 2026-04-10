@@ -88,15 +88,51 @@ class DeviceEnumerator {
     }
 
     /// Maps a resolution preset integer to an AVCaptureSession.Preset.
+    /// Order matches Dart [ResolutionPreset]: low, medium, high (~720p), veryHigh (~1080p),
+    /// ultraHigh (~4K), max (prefer highest).
     static func sessionPreset(for preset: Int) -> AVCaptureSession.Preset {
         switch preset {
         case 0: return .low
         case 1: return .medium
-        case 2: return .high
-        case 3: return .hd1280x720
-        case 4, 5: return .hd1920x1080
-        default: return .high
+        case 2: return .hd1280x720
+        case 3: return .hd1920x1080
+        case 4, 5:
+            if #available(macOS 10.15, *) {
+                return .hd4K3840x2160
+            }
+            return .hd1920x1080
+        default: return .hd1280x720
         }
+    }
+
+    /// Presets ordered from smallest to largest typical output (soft preference).
+    private static func presetSizeRankOrder() -> [AVCaptureSession.Preset] {
+        var order: [AVCaptureSession.Preset] = [
+            .low, .medium, .high, .hd1280x720, .hd1920x1080,
+        ]
+        if #available(macOS 10.15, *) {
+            order.append(.hd4K3840x2160)
+        }
+        return order
+    }
+
+    /// Try [desired] first, then step down toward smaller presets, then step up
+    /// toward larger ones so sparse devices can open (e.g. only 1080p when asking for 480p).
+    static func presetCandidates(startingFrom desired: AVCaptureSession.Preset) -> [AVCaptureSession.Preset] {
+        let order = presetSizeRankOrder()
+        guard let idx = order.firstIndex(of: desired) else {
+            return [desired] + order
+        }
+        var out: [AVCaptureSession.Preset] = []
+        for i in stride(from: idx, through: 0, by: -1) {
+            out.append(order[i])
+        }
+        if idx + 1 < order.count {
+            for i in (idx + 1)..<order.count {
+                out.append(order[i])
+            }
+        }
+        return out
     }
 
     /// Gets the actual output dimensions for a device with a given session preset.
@@ -114,7 +150,11 @@ class DeviceEnumerator {
         case .medium: return (480, 360)
         case .hd1280x720: return (1280, 720)
         case .hd1920x1080: return (1920, 1080)
-        default: return (1280, 720)
+        default:
+            if #available(macOS 10.15, *), preset == .hd4K3840x2160 {
+                return (3840, 2160)
+            }
+            return (1280, 720)
         }
     }
 }

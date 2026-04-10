@@ -7,3 +7,4 @@
 library;
 
 export 'src/camera_desktop_plugin.dart';
+export 'src/desktop_capture_hints.dart';

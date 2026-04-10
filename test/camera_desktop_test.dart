@@ -14,6 +14,7 @@ void main() {
     final List<MethodCall> log = <MethodCall>[];
 
     setUp(() {
+      CameraDesktopCaptureHints.allowUpscaleToOnlyAvailableFormat = true;
       channel = const MethodChannel('plugins.flutter.io/camera_desktop');
       plugin = CameraDesktopPlugin(channel: channel);
       log.clear;
@@ -81,6 +82,23 @@ void main() {
       );
       expect(cameraId, 1);
       expect(log.last.method, 'create');
+      final args = log.last.arguments as Map<Object?, Object?>;
+      expect(args['allowUpscaleToOnlyAvailable'], true);
+    });
+
+    test('createCamera forwards allowUpscaleToOnlyAvailable hint', () async {
+      CameraDesktopCaptureHints.allowUpscaleToOnlyAvailableFormat = false;
+      const description = CameraDescription(
+        name: 'Test Camera (/dev/video0)',
+        lensDirection: CameraLensDirection.external,
+        sensorOrientation: 0,
+      );
+      await plugin.createCameraWithSettings(
+        description,
+        const MediaSettings(resolutionPreset: ResolutionPreset.medium),
+      );
+      final args = log.last.arguments as Map<Object?, Object?>;
+      expect(args['allowUpscaleToOnlyAvailable'], false);
     });
 
     test('initializeCamera fires CameraInitializedEvent', () async {
@@ -136,6 +154,26 @@ void main() {
       expect(file.path, '/tmp/test.jpg');
     });
 
+    test('takePicture forwards outputPath from capture hints', () async {
+      const description = CameraDescription(
+        name: 'Test Camera (/dev/video0)',
+        lensDirection: CameraLensDirection.external,
+        sensorOrientation: 0,
+      );
+      final cameraId = await plugin.createCameraWithSettings(
+        description,
+        const MediaSettings(resolutionPreset: ResolutionPreset.high),
+      );
+      await plugin.initializeCamera(cameraId);
+      CameraDesktopCaptureHints.setNextPhotoCapturePath(
+        cameraId,
+        '/custom/photo.jpg',
+      );
+      await plugin.takePicture(cameraId);
+      final args = log.last.arguments as Map<Object?, Object?>;
+      expect(args['outputPath'], '/custom/photo.jpg');
+    });
+
     test('dispose calls native dispose', () async {
       const description = CameraDescription(
         name: 'Test Camera (/dev/video0)',
@@ -163,6 +201,26 @@ void main() {
       await plugin.initializeCamera(cameraId);
       await plugin.startVideoRecording(cameraId);
       expect(log.last.method, 'startVideoRecording');
+    });
+
+    test('startVideoRecording forwards outputPath from capture hints', () async {
+      const description = CameraDescription(
+        name: 'Test Camera (/dev/video0)',
+        lensDirection: CameraLensDirection.external,
+        sensorOrientation: 0,
+      );
+      final cameraId = await plugin.createCameraWithSettings(
+        description,
+        const MediaSettings(resolutionPreset: ResolutionPreset.high),
+      );
+      await plugin.initializeCamera(cameraId);
+      CameraDesktopCaptureHints.setNextVideoRecordingPath(
+        cameraId,
+        '/custom/out.mp4',
+      );
+      await plugin.startVideoRecording(cameraId);
+      final args = log.last.arguments as Map<Object?, Object?>;
+      expect(args['outputPath'], '/custom/out.mp4');
     });
 
     test('stopVideoRecording returns XFile', () async {

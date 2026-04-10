@@ -223,12 +223,16 @@ public class CameraDesktopPlugin: NSObject, FlutterPlugin, NSApplicationDelegate
 
     private func handleTakePicture(call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let session = findSession(call: call, result: result) else { return }
-        session.takePicture(result: result)
+        let raw = (call.arguments as? [String: Any])?["outputPath"] as? String
+        let out = (raw?.isEmpty == false) ? raw : nil
+        session.takePicture(outputPath: out, result: result)
     }
 
     private func handleStartVideoRecording(call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let session = findSession(call: call, result: result) else { return }
-        session.startVideoRecording(result: result)
+        let raw = (call.arguments as? [String: Any])?["outputPath"] as? String
+        let out = (raw?.isEmpty == false) ? raw : nil
+        session.startVideoRecording(outputPath: out, result: result)
     }
 
     private func handleStopVideoRecording(call: FlutterMethodCall, result: @escaping FlutterResult) {

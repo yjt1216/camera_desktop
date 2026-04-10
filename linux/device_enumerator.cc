@@ -18,7 +18,7 @@ static const int kMinFps = 15;
 static const int kStandardHeights[] = {240, 480, 720, 1080, 2160};
 static const int kStandardWidths[] = {320, 640, 1280, 1920, 3840};
 
-// Maximum height per resolution preset.
+// Target maximum height per preset (soft preference for negotiation).
 static int MaxHeightForPreset(int preset) {
   switch (preset) {
     case ResolutionPreset::kLow:
@@ -220,7 +220,7 @@ ResolutionInfo DeviceEnumerator::SelectResolution(
     int preset) {
   int max_height = MaxHeightForPreset(preset);
 
-  // Find the highest resolution that fits within the preset ceiling and
+  // Prefer the highest resolution that fits within the preset ceiling and
   // has at least kMinFps. Resolutions are sorted descending.
   for (const auto& r : resolutions) {
     if (r.height <= max_height && r.max_fps >= kMinFps) {
@@ -237,11 +237,13 @@ ResolutionInfo DeviceEnumerator::SelectResolution(
       return r;
     }
   }
-  // Absolute fallback: return the lowest resolution available.
+  // No mode at or below the ceiling: use the smallest reported height (sorted
+  // descending → back()) as the least-upscale option, e.g. sole 1080p.
   if (!resolutions.empty()) {
     const auto& r = resolutions.back();
-    g_info("[camera_desktop] SelectResolution(preset=%d): lowest-available"
-           " fallback %dx%d@%dfps", preset, r.width, r.height, r.max_fps);
+    g_info("[camera_desktop] SelectResolution(preset=%d): below-ceiling-none,"
+           " smallest-available fallback %dx%d@%dfps",
+           preset, r.width, r.height, r.max_fps);
     return r;
   }
   // No resolutions found, return a default and let GStreamer negotiate.

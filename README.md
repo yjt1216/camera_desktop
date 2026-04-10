@@ -76,6 +76,66 @@ final controller = CameraController(
 These settings are applied during `initialize()`. To change them you must
 `dispose()` the controller and create a new one, see [Limitations](#limitations).
 
+### Custom photo / video output paths
+
+The standard `CameraController.takePicture()` / `startVideoRecording()` API does
+not take a file path. On desktop you can still choose where files are written by
+using [`CameraDesktopCaptureHints`](lib/src/desktop_capture_hints.dart) together
+with the controller’s [`cameraId`](https://pub.dev/documentation/camera/latest/camera/CameraController/cameraId.html):
+
+```dart
+import 'package:camera/camera.dart';
+import 'package:camera_desktop/camera_desktop.dart';
+import 'package:path_provider/path_provider.dart';
+
+final dir = await getApplicationDocumentsDirectory();
+final photoPath = '${dir.path}/my_shot.jpg';
+CameraDesktopCaptureHints.setNextPhotoCapturePath(
+  controller.cameraId,
+  photoPath,
+);
+final xfile = await controller.takePicture();
+
+// Video: set the path immediately before startVideoRecording (same cameraId).
+CameraDesktopCaptureHints.setNextVideoRecordingPath(
+  controller.cameraId,
+  '${dir.path}/my_clip.mp4',
+);
+await controller.startVideoRecording();
+await controller.stopVideoRecording();
+```
+
+Paths are consumed when the matching native call runs. Pending paths for a
+camera are cleared on `dispose()`. You must create parent directories first;
+JPEG is always used for stills. For **Linux** video, prefer an extension that
+matches the active muxer (often `.mp4`, sometimes `.mkv` if Matroska is used).
+
+### Resolution presets (desktop semantics)
+
+On desktop, [`ResolutionPreset`](https://pub.dev/documentation/camera_platform_interface/latest/camera_platform_interface/ResolutionPreset.html)
+is a **preference / sorting hint** for capture negotiation, **not** a guarantee
+that preview, stills, or recording will stay at or below a pixel ceiling. The
+plugin prefers formats at or under the usual height band for that preset (240p,
+480p, 720p, 1080p, 4K, or unconstrained for `max`). If the device exposes **no**
+such mode (for example only 1080p while you asked for 720p), negotiation **may
+use the closest available mode** (typically the smallest height above your hint)
+so the stream can start instead of failing initialization.
+
+Strict pixel contracts belong in app code: read the size from
+`CameraInitializedEvent` / the first frame and scale, crop, or letterbox in
+Flutter as needed.
+
+**Windows (optional):** set
+`CameraDesktopCaptureHints.allowUpscaleToOnlyAvailableFormat = false` before
+`createCamera` / `createCameraWithSettings` to restore strict “never above the
+preset height hint” filtering (sparse devices may fail to open).
+
+Preview layout, crop, and downscale are best handled in Flutter (e.g. `FittedBox`,
+`BoxFit`, or `dart:ui`/`package:image` after the first frame). Additional soft
+hints such as `maxWidth` / `maxHeight` / `preferFps` are not wired through
+`MediaSettings` today; file an issue if you need them as explicit sort keys on a
+given platform.
+
 ## Platform-Specific Setup
 
 ### Linux

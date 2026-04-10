@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:stream_transform/stream_transform.dart';
 
+import 'desktop_capture_hints.dart';
 import 'image_stream_ffi.dart';
 
 /// Desktop implementation of [CameraPlatform].
@@ -216,6 +217,8 @@ class CameraDesktopPlugin extends CameraPlatform {
         'fps': mediaSettings.fps,
         'videoBitrate': ?videoBitrate,
         'audioBitrate': ?audioBitrate,
+        'allowUpscaleToOnlyAvailable':
+            CameraDesktopCaptureHints.allowUpscaleToOnlyAvailableFormat,
       });
       final cameraId = result!['cameraId'] as int;
       final textureId = result['textureId'] as int;
@@ -265,6 +268,7 @@ class CameraDesktopPlugin extends CameraPlatform {
       await _channel.invokeMethod<void>('dispose', {'cameraId': cameraId});
     } on PlatformException catch (_) {
     } finally {
+      CameraDesktopCaptureHints.clearPendingPathsForCamera(cameraId);
       _textureIds.remove(cameraId);
       final imageController = _imageStreamControllers.remove(cameraId);
       if (imageController != null && !imageController.isClosed) {
@@ -444,9 +448,12 @@ class CameraDesktopPlugin extends CameraPlatform {
 
   @override
   Future<XFile> takePicture(int cameraId) async {
+    final outputPath =
+        CameraDesktopCaptureHints.consumeNextPhotoCapturePath(cameraId);
     try {
       final path = await _channel.invokeMethod<String>('takePicture', {
         'cameraId': cameraId,
+        'outputPath': ?outputPath,
       });
       return XFile(path!);
     } on PlatformException catch (e) {
@@ -474,11 +481,14 @@ class CameraDesktopPlugin extends CameraPlatform {
     int cameraId, {
     Duration? maxVideoDuration,
   }) async {
+    final outputPath =
+        CameraDesktopCaptureHints.consumeNextVideoRecordingPath(cameraId);
     try {
       await _channel.invokeMethod<void>('startVideoRecording', {
         'cameraId': cameraId,
         if (maxVideoDuration != null)
           'maxVideoDuration': maxVideoDuration.inMilliseconds,
+        'outputPath': ?outputPath,
       });
     } on PlatformException catch (e) {
       throw CameraException(e.code, e.message);

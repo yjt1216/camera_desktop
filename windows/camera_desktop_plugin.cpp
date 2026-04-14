@@ -17,7 +17,32 @@
 #include "device_enumerator.h"
 #include "logging.h"
 
+#include <condition_variable>
+#include <functional>
+#include <mutex>
+
 namespace {
+
+// Posted to the Flutter top-level HWND so MethodChannel / TextureRegistrar run
+// on the platform thread (see shell.cc channel threading checks).
+constexpr UINT kCameraDesktopRunOnUiMsg = WM_APP + 0x6280;
+
+struct RunOnUiHeapPayload {
+  std::function<void()> task;
+  std::mutex done_mtx;
+  std::condition_variable cv;
+  bool done = false;
+};
+
+// FlutterView HWND is often a child; RegisterTopLevelWindowProcDelegate runs on
+// the *root* frame. PostMessage must target that root or WM_APP never reaches us.
+HWND CameraDesktopRootHwnd(HWND view_hwnd) {
+  if (!view_hwnd) {
+    return nullptr;
+  }
+  HWND root = GetAncestor(view_hwnd, GA_ROOT);
+  return root ? root : view_hwnd;
+}
 
 std::optional<std::wstring> Utf8OutputPathFromArgs(
     const flutter::EncodableMap& args) {
@@ -83,7 +108,78 @@ void CameraDesktopPlugin::RegisterWithRegistrar(
 CameraDesktopPlugin::CameraDesktopPlugin(
     flutter::PluginRegistrarWindows* registrar,
     std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel)
-    : registrar_(registrar), channel_(std::move(channel)) {}
+    : registrar_(registrar), channel_(std::move(channel)) {
+  EnsureRunOnUiHook();
+}
+
+void CameraDesktopPlugin::EnsureRunOnUiHook() {
+  if (!flutter_view_hwnd_ && registrar_->GetView()) {
+    flutter_view_hwnd_ = CameraDesktopRootHwnd(
+        registrar_->GetView()->GetNativeWindow());
+  }
+  if (flutter_view_hwnd_ && window_proc_delegate_id_ == 0) {
+    window_proc_delegate_id_ =
+        registrar_->RegisterTopLevelWindowProcDelegate([this](HWND hwnd,
+                                                               UINT message,
+                                                               WPARAM wparam,
+                                                               LPARAM lparam) {
+          return OnTopLevelWindowProc(hwnd, message, wparam, lparam);
+        });
+  }
+}
+
+void CameraDesktopPlugin::RunSyncOnUi(HWND hwnd, std::function<void()> task) {
+  if (!task) {
+    return;
+  }
+  if (!hwnd) {
+    task();
+    return;
+  }
+  const DWORD ui_tid = GetWindowThreadProcessId(hwnd, nullptr);
+  if (ui_tid != 0 && GetCurrentThreadId() == ui_tid) {
+    task();
+    return;
+  }
+  auto* payload = new RunOnUiHeapPayload();
+  payload->task = std::move(task);
+  if (!PostMessageW(hwnd, kCameraDesktopRunOnUiMsg, 0,
+                    reinterpret_cast<LPARAM>(payload))) {
+    std::function<void()> fallback = std::move(payload->task);
+    delete payload;
+    if (fallback) {
+      fallback();
+    }
+    return;
+  }
+  {
+    std::unique_lock<std::mutex> lk(payload->done_mtx);
+    payload->cv.wait(lk, [&] { return payload->done; });
+  }
+  delete payload;
+}
+
+std::optional<LRESULT> CameraDesktopPlugin::OnTopLevelWindowProc(
+    HWND hwnd,
+    UINT message,
+    WPARAM wparam,
+    LPARAM lparam) {
+  (void)hwnd;
+  (void)wparam;
+  if (message != kCameraDesktopRunOnUiMsg || lparam == 0) {
+    return std::nullopt;
+  }
+  auto* payload = reinterpret_cast<RunOnUiHeapPayload*>(lparam);
+  if (payload->task) {
+    payload->task();
+  }
+  {
+    std::lock_guard<std::mutex> lk(payload->done_mtx);
+    payload->done = true;
+  }
+  payload->cv.notify_one();
+  return std::optional<LRESULT>(static_cast<LRESULT>(0));
+}
 
 CameraDesktopPlugin::~CameraDesktopPlugin() {
   shutting_down_ = true;
@@ -95,6 +191,10 @@ CameraDesktopPlugin::~CameraDesktopPlugin() {
       camera->Dispose();
     }
     cameras_.clear();
+  }
+  if (window_proc_delegate_id_ != 0) {
+    registrar_->UnregisterTopLevelWindowProcDelegate(window_proc_delegate_id_);
+    window_proc_delegate_id_ = 0;
   }
   MFShutdown();
   if (should_co_uninitialize_) {
@@ -302,10 +402,15 @@ void CameraDesktopPlugin::HandleCreate(
 
   int camera_id = next_camera_id_++;
   DebugLog("HandleCreate: assigning camera_id=" + std::to_string(camera_id));
+  EnsureRunOnUiHook();
+  auto run_on_ui = [hwnd = flutter_view_hwnd_](std::function<void()> f) {
+    CameraDesktopPlugin::RunSyncOnUi(hwnd, std::move(f));
+  };
   auto camera = std::make_shared<Camera>(
       camera_id,
       registrar_->texture_registrar(),
       channel_.get(),
+      std::move(run_on_ui),
       config);
 
   int64_t texture_id = camera->RegisterTexture();

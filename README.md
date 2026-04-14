@@ -242,6 +242,31 @@ final caps = await CameraDesktopPlugin().getPlatformCapabilities();
 This is useful when building UIs that conditionally expose controls based on the
 running platform.
 
+## Troubleshooting: preview is black or never updates
+
+1. **Wait for initialization** — `CameraPreview` only paints after
+   `await controller.initialize()` completes. Until then it shows an empty
+   `Container`.
+
+2. **Dependencies** — The app `pubspec.yaml` must include both `camera` and
+   `camera_desktop` (path or pub.dev) for Linux, macOS, or Windows. The federated
+   plugin registers `CameraDesktopPlugin` as `CameraPlatform.instance` at
+   startup; without `camera_desktop`, desktop builds have no camera backend.
+
+3. **Layout** — Put `CameraPreview` inside a parent with a **bounded** maximum
+   size (for example `Expanded` in a `Column`, or `SizedBox` with a height).
+   `AspectRatio` needs finite constraints; an unbounded parent can collapse the
+   preview to zero height.
+
+4. **Windows** — Preview samples are delivered on a Media Foundation worker
+   thread. The plugin updates the Flutter `PixelBufferTexture` from that thread
+   and calls `MarkTextureFrameAvailable` there (marshalling that work onto the
+   UI thread with a **synchronous** wait can deadlock the message pump on some
+   machines, which shows up as `initialize` timing out with “no frames
+   received”). Method-channel replies (`initialize` result, errors) still run
+   on the platform thread via `RunSyncOnUi`. If the preview is black but init
+   succeeds, check logs for `OnPreviewSample` and driver-specific MF errors.
+
 ## Limitations
 
 Desktop cameras generally do not support mobile-oriented features:

@@ -75,9 +75,11 @@ class _CameraExamplePageState extends State<CameraExamplePage> {
   int _fps = 30;
   int _videoBitrate = 5000000;
   int _audioBitrate = 128000;
-  bool _enableAudio = true;
+  bool _enableAudio = false;
   bool _showSettings = false;
   bool _isReinitializing = false;
+  /// User explicitly disposed the camera; show reopen UI instead of endless spinner.
+  bool _cameraReleased = false;
 
   final RecentMediaStore _mediaStore = RecentMediaStore();
 
@@ -99,6 +101,54 @@ class _CameraExamplePageState extends State<CameraExamplePage> {
       setState(() => _errorMessage = 'Camera error: ${e.description}');
     } catch (e) {
       setState(() => _errorMessage = 'Error: $e');
+    }
+  }
+
+  Future<void> _releaseCamera() async {
+    if (!_isInitialized || _controller == null) return;
+    if (_isRecording || _isStoppingRecording) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先停止录像后再释放摄像头')),
+      );
+      return;
+    }
+
+    _recordingTimer?.cancel();
+    await _controller!.dispose();
+    if (!mounted) return;
+    setState(() {
+      _controller = null;
+      _isInitialized = false;
+      _cameraReleased = true;
+      _showSettings = false;
+      _errorMessage = null;
+    });
+  }
+
+  Future<void> _openCamera() async {
+    if (_cameras.isEmpty) return;
+    setState(() {
+      _cameraReleased = false;
+      _isReinitializing = true;
+      _errorMessage = null;
+    });
+    try {
+      await _createAndInitController();
+    } on CameraException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isReinitializing = false;
+        _cameraReleased = true;
+        _errorMessage = 'Camera error: ${e.description}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isReinitializing = false;
+        _cameraReleased = true;
+        _errorMessage = 'Error: $e';
+      });
     }
   }
 
@@ -255,6 +305,16 @@ class _CameraExamplePageState extends State<CameraExamplePage> {
         title: const Text('Camera Desktop Example'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.videocam_off_outlined),
+            tooltip: '释放摄像头',
+            onPressed: _isInitialized &&
+                    !_isRecording &&
+                    !_isStoppingRecording &&
+                    !_isReinitializing
+                ? _releaseCamera
+                : null,
+          ),
+          IconButton(
             icon: Icon(
               _showSettings ? Icons.settings : Icons.settings_outlined,
             ),
@@ -302,8 +362,44 @@ class _CameraExamplePageState extends State<CameraExamplePage> {
   }
 
   Widget _buildPreview() {
-    if (_errorMessage != null && !_isInitialized && !_isReinitializing) {
+    if (_errorMessage != null &&
+        !_isInitialized &&
+        !_isReinitializing &&
+        !_cameraReleased) {
       return Center(child: Text(_errorMessage!));
+    }
+    if (_cameraReleased && !_isReinitializing) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.videocam_off_outlined,
+                size: 56,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _errorMessage ?? '摄像头已释放',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: _errorMessage != null
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                    ),
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _cameras.isEmpty ? null : _openCamera,
+                icon: const Icon(Icons.videocam),
+                label: const Text('打开摄像头'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
     if (!_isInitialized || _controller == null) {
       return const Center(child: CircularProgressIndicator());

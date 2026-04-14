@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:stream_transform/stream_transform.dart';
 
+import 'camera_desktop_windows_pigeon.dart';
 import 'desktop_capture_hints.dart';
 import 'image_stream_ffi.dart';
 
@@ -30,8 +31,16 @@ class CameraDesktopPlugin extends CameraPlatform {
            channel ?? const MethodChannel('plugins.flutter.io/camera_desktop');
 
   /// Registers this class as the default [CameraPlatform] implementation.
+  ///
+  /// Windows uses the Pigeon-based stack ([CameraDesktopWindowsPigeon]) to
+  /// match the native `CameraPlugin` / `messages.g` implementation. Linux and
+  /// macOS keep the MethodChannel (`plugins.flutter.io/camera_desktop`) path.
   static void registerWith() {
-    CameraPlatform.instance = CameraDesktopPlugin();
+    if (Platform.isWindows) {
+      CameraDesktopWindowsPigeon.registerWith();
+    } else {
+      CameraPlatform.instance = CameraDesktopPlugin();
+    }
   }
 
   /// The method channel used to communicate with the native platform.
@@ -209,17 +218,25 @@ class CameraDesktopPlugin extends CameraPlatform {
       }
     } catch (_) {}
     try {
-      final result = await _channel.invokeMapMethod<String, dynamic>('create', {
+      final createArgs = <String, dynamic>{
         'cameraName': cameraDescription.name,
         'resolutionPreset':
             mediaSettings.resolutionPreset?.index ?? ResolutionPreset.max.index,
         'enableAudio': mediaSettings.enableAudio,
         'fps': mediaSettings.fps,
-        'videoBitrate': ?videoBitrate,
-        'audioBitrate': ?audioBitrate,
         'allowUpscaleToOnlyAvailable':
             CameraDesktopCaptureHints.allowUpscaleToOnlyAvailableFormat,
-      });
+      };
+      if (videoBitrate != null) {
+        createArgs['videoBitrate'] = videoBitrate;
+      }
+      if (audioBitrate != null) {
+        createArgs['audioBitrate'] = audioBitrate;
+      }
+      final result = await _channel.invokeMapMethod<String, dynamic>(
+        'create',
+        createArgs,
+      );
       final cameraId = result!['cameraId'] as int;
       final textureId = result['textureId'] as int;
       _textureIds[cameraId] = textureId;
@@ -451,10 +468,11 @@ class CameraDesktopPlugin extends CameraPlatform {
     final outputPath =
         CameraDesktopCaptureHints.consumeNextPhotoCapturePath(cameraId);
     try {
-      final path = await _channel.invokeMethod<String>('takePicture', {
-        'cameraId': cameraId,
-        'outputPath': ?outputPath,
-      });
+      final takeArgs = <String, dynamic>{'cameraId': cameraId};
+      if (outputPath != null) {
+        takeArgs['outputPath'] = outputPath;
+      }
+      final path = await _channel.invokeMethod<String>('takePicture', takeArgs);
       return XFile(path!);
     } on PlatformException catch (e) {
       throw CameraException(e.code, e.message);
@@ -484,12 +502,14 @@ class CameraDesktopPlugin extends CameraPlatform {
     final outputPath =
         CameraDesktopCaptureHints.consumeNextVideoRecordingPath(cameraId);
     try {
-      await _channel.invokeMethod<void>('startVideoRecording', {
-        'cameraId': cameraId,
-        if (maxVideoDuration != null)
-          'maxVideoDuration': maxVideoDuration.inMilliseconds,
-        'outputPath': ?outputPath,
-      });
+      final recArgs = <String, dynamic>{'cameraId': cameraId};
+      if (maxVideoDuration != null) {
+        recArgs['maxVideoDuration'] = maxVideoDuration.inMilliseconds;
+      }
+      if (outputPath != null) {
+        recArgs['outputPath'] = outputPath;
+      }
+      await _channel.invokeMethod<void>('startVideoRecording', recArgs);
     } on PlatformException catch (e) {
       throw CameraException(e.code, e.message);
     }

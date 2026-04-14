@@ -35,7 +35,8 @@ class CameraDesktopCaptureHints {
   }
 
   /// Writes the next recording for [cameraId] to [path] instead of a temp
-  /// file. Consumed when [CameraDesktopPlugin.startVideoRecording] runs.
+  /// file. Consumed when recording starts ([CameraDesktopPlugin] on Linux /
+  /// macOS, [CameraDesktopWindowsPigeon] on Windows).
   ///
   /// Use an extension appropriate for the platform (typically `.mp4` on
   /// macOS/Windows; Linux follows the active GStreamer muxer, often `.mp4` or

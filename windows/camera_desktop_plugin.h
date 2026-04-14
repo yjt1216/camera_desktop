@@ -3,9 +3,13 @@
 #include <flutter/method_channel.h>
 #include <flutter/plugin_registrar_windows.h>
 
+#include <windows.h>
+
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "camera.h"
 
@@ -23,6 +27,11 @@ class CameraDesktopPlugin : public flutter::Plugin {
 
   // Global instance for FFI access.
   static CameraDesktopPlugin* instance() { return instance_; }
+
+  /// Marshals |task| onto the Flutter view's HWND message loop (platform
+  /// thread). Safe to call from any thread. No-op HWND falls back to |task| on
+  /// the current thread (best effort).
+  static void RunSyncOnUi(HWND hwnd, std::function<void()> task);
 
  private:
   void HandleMethodCall(
@@ -68,6 +77,14 @@ class CameraDesktopPlugin : public flutter::Plugin {
       const flutter::EncodableMap& args,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
 
+  std::optional<LRESULT> OnTopLevelWindowProc(HWND hwnd,
+                                              UINT message,
+                                              WPARAM wparam,
+                                              LPARAM lparam);
+
+  /// Resolves root HWND and registers the top-level WindowProc hook once.
+  void EnsureRunOnUiHook();
+
   // Returns the camera for |args["cameraId"]| or responds with an error.
   std::shared_ptr<Camera> FindCamera(
       const flutter::EncodableMap& args,
@@ -80,6 +97,10 @@ class CameraDesktopPlugin : public flutter::Plugin {
   int next_camera_id_ = 1;
   bool should_co_uninitialize_ = false;
   bool shutting_down_ = false;
+
+  /// Root HWND used with PostMessage for RunSyncOnUi (not necessarily the view child).
+  HWND flutter_view_hwnd_ = nullptr;
+  int window_proc_delegate_id_ = 0;
 
   static CameraDesktopPlugin* instance_;
 };

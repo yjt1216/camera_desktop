@@ -1,140 +1,143 @@
+// Copyright 2013 The Flutter Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "photo_handler.h"
 
+#include <mfapi.h>
+#include <mfcaptureengine.h>
 #include <wincodec.h>
-#include <wrl/client.h>
 
-#include <chrono>
-#include <sstream>
-#include <string>
-#include <vector>
+#include <cassert>
 
-#include "logging.h"
+#include "capture_engine_listener.h"
+#include "string_utils.h"
+
+namespace camera_windows {
 
 using Microsoft::WRL::ComPtr;
 
-bool PhotoHandler::Write(const uint8_t* bgra, int width, int height,
-                         const std::wstring& path, std::string* error) {
-  DebugLog("PhotoHandler::Write: " + std::to_string(width) + "x" +
-           std::to_string(height) + " path.length=" + std::to_string(path.size()));
+// Initializes media type for photo capture for jpeg images.
+HRESULT BuildMediaTypeForPhotoCapture(IMFMediaType* src_media_type,
+                                      IMFMediaType** photo_media_type,
+                                      GUID image_format) {
+  assert(src_media_type);
+  ComPtr<IMFMediaType> new_media_type;
 
-  if (!bgra || width <= 0 || height <= 0) {
-    if (error) *error = "Invalid image buffer";
-    return false;
-  }
-
-  ComPtr<IWICImagingFactory> wic;
-  HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
-                                CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+  HRESULT hr = MFCreateMediaType(&new_media_type);
   if (FAILED(hr)) {
-    DebugLog("PhotoHandler::Write: CoCreateInstance WIC factory failed " + HrToString(hr));
-    if (error) *error = "Failed to create WIC factory";
-    return false;
+    return hr;
   }
 
-  ComPtr<IWICStream> stream;
-  hr = wic->CreateStream(&stream);
+  // Clones everything from original media type.
+  hr = src_media_type->CopyAllItems(new_media_type.Get());
   if (FAILED(hr)) {
-    DebugLog("PhotoHandler::Write: CreateStream failed " + HrToString(hr));
-    if (error) *error = "Failed to create WIC stream";
-    return false;
+    return hr;
   }
 
-  hr = stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE);
+  hr = new_media_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Image);
   if (FAILED(hr)) {
-    DebugLog("PhotoHandler::Write: InitializeFromFilename failed " + HrToString(hr));
-    if (error) *error = "Failed to open output file";
-    return false;
+    return hr;
   }
 
-  ComPtr<IWICBitmapEncoder> encoder;
-  hr = wic->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder);
+  hr = new_media_type->SetGUID(MF_MT_SUBTYPE, image_format);
   if (FAILED(hr)) {
-    if (error) *error = "Failed to create JPEG encoder";
-    return false;
+    return hr;
   }
 
-  hr = encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache);
-  if (FAILED(hr)) {
-    if (error) *error = "Failed to initialize encoder";
-    return false;
-  }
+  new_media_type.CopyTo(photo_media_type);
+  return hr;
+}
 
-  ComPtr<IWICBitmapFrameEncode> frame;
-  hr = encoder->CreateNewFrame(&frame, nullptr);
-  if (FAILED(hr)) {
-    if (error) *error = "Failed to create frame";
-    return false;
-  }
+HRESULT PhotoHandler::InitPhotoSink(IMFCaptureEngine* capture_engine,
+                                    IMFMediaType* base_media_type) {
+  assert(capture_engine);
+  assert(base_media_type);
 
-  hr = frame->Initialize(nullptr);
-  if (FAILED(hr)) {
-    if (error) *error = "Failed to initialize frame";
-    return false;
-  }
+  HRESULT hr = S_OK;
 
-  hr = frame->SetSize(static_cast<UINT>(width), static_cast<UINT>(height));
-  if (FAILED(hr)) {
-    if (error) *error = "Failed to set frame size";
-    return false;
-  }
+  if (photo_sink_) {
+    // If photo sink already exists, only update output filename.
+    hr = photo_sink_->SetOutputFileName(Utf16FromUtf8(file_path_).c_str());
 
-  WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
-  hr = frame->SetPixelFormat(&fmt);
-  if (FAILED(hr)) {
-    if (error) *error = "Failed to set pixel format";
-    return false;
-  }
-  if (fmt != GUID_WICPixelFormat24bppBGR) {
-    if (error) *error = "JPEG encoder rejected 24bppBGR pixel format";
-    return false;
-  }
-
-  // JPEG does not store alpha. Convert BGRA32 to packed BGR24 explicitly.
-  const UINT stride = static_cast<UINT>(width) * 3;
-  const UINT data_size = stride * static_cast<UINT>(height);
-  std::vector<uint8_t> bgr24(data_size);
-  for (int y = 0; y < height; ++y) {
-    const uint8_t* src_row = bgra + static_cast<size_t>(y) * width * 4;
-    uint8_t* dst_row = bgr24.data() + static_cast<size_t>(y) * stride;
-    for (int x = 0; x < width; ++x) {
-      dst_row[x * 3 + 0] = src_row[x * 4 + 0];
-      dst_row[x * 3 + 1] = src_row[x * 4 + 1];
-      dst_row[x * 3 + 2] = src_row[x * 4 + 2];
+    if (FAILED(hr)) {
+      photo_sink_ = nullptr;
     }
+
+    return hr;
   }
 
-  hr = frame->WritePixels(static_cast<UINT>(height), stride, data_size,
-                          bgr24.data());
+  ComPtr<IMFMediaType> photo_media_type;
+  ComPtr<IMFCaptureSink> capture_sink;
+
+  // Get sink with photo type.
+  hr =
+      capture_engine->GetSink(MF_CAPTURE_ENGINE_SINK_TYPE_PHOTO, &capture_sink);
   if (FAILED(hr)) {
-    if (error) *error = "Failed to write pixels";
-    return false;
+    return hr;
   }
 
-  hr = frame->Commit();
+  hr = capture_sink.As(&photo_sink_);
   if (FAILED(hr)) {
-    if (error) *error = "Failed to commit frame";
-    return false;
+    photo_sink_ = nullptr;
+    return hr;
   }
 
-  hr = encoder->Commit();
+  hr = photo_sink_->RemoveAllStreams();
   if (FAILED(hr)) {
-    if (error) *error = "Failed to commit encoder";
-    return false;
+    photo_sink_ = nullptr;
+    return hr;
   }
 
-  DebugLog("PhotoHandler::Write: success " + std::to_string(width) + "x" + std::to_string(height));
-  return true;
+  hr = BuildMediaTypeForPhotoCapture(base_media_type,
+                                     photo_media_type.GetAddressOf(),
+                                     GUID_ContainerFormatJpeg);
+
+  if (FAILED(hr)) {
+    photo_sink_ = nullptr;
+    return hr;
+  }
+
+  DWORD photo_sink_stream_index;
+  hr = photo_sink_->AddStream(
+      (DWORD)MF_CAPTURE_ENGINE_PREFERRED_SOURCE_STREAM_FOR_PHOTO,
+      photo_media_type.Get(), nullptr, &photo_sink_stream_index);
+  if (FAILED(hr)) {
+    photo_sink_ = nullptr;
+    return hr;
+  }
+
+  hr = photo_sink_->SetOutputFileName(Utf16FromUtf8(file_path_).c_str());
+  if (FAILED(hr)) {
+    photo_sink_ = nullptr;
+    return hr;
+  }
+
+  return hr;
 }
 
-std::wstring PhotoHandler::GeneratePath(int camera_id) {
-  WCHAR temp_dir[MAX_PATH];
-  GetTempPathW(MAX_PATH, temp_dir);
+HRESULT PhotoHandler::TakePhoto(const std::string& file_path,
+                                IMFCaptureEngine* capture_engine,
+                                IMFMediaType* base_media_type) {
+  assert(!file_path.empty());
+  assert(capture_engine);
+  assert(base_media_type);
 
-  auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-  std::wostringstream ss;
-  ss << temp_dir << L"camera_desktop_" << camera_id << L"_" << now << L".jpg";
-  std::wstring path = ss.str();
-  DebugLog("PhotoHandler::GeneratePath: camera_id=" + std::to_string(camera_id) +
-           " path=" + WideToUtf8(path));
-  return path;
+  file_path_ = file_path;
+
+  HRESULT hr = InitPhotoSink(capture_engine, base_media_type);
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  photo_state_ = PhotoState::kTakingPhoto;
+
+  return capture_engine->TakePhoto();
 }
+
+void PhotoHandler::OnPhotoTaken() {
+  assert(photo_state_ == PhotoState::kTakingPhoto);
+  photo_state_ = PhotoState::kIdle;
+}
+
+}  // namespace camera_windows
